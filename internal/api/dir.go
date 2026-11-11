@@ -12,7 +12,7 @@ import (
 func (h *Handler) listDirs(c *gin.Context) {
 	dirs, err := h.store.ListDirs()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询目录失败: " + err.Error()})
+		apiErr(c, http.StatusInternalServerError, codeDirQueryFailed, err.Error())
 		return
 	}
 	if dirs == nil {

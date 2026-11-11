@@ -4,6 +4,7 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"os"
@@ -88,7 +89,7 @@ func (s *Scanner) Scan(ctx context.Context) (model.ScanResult, error) {
 	res := model.ScanResult{}
 
 	// 1. 发现全部音频文件
-	paths, err := s.discover()
+	paths, incomplete, err := s.discover()
 	if err != nil {
 		return res, err
 	}
@@ -140,25 +141,35 @@ func (s *Scanner) Scan(ctx context.Context) (model.ScanResult, error) {
 	wg.Wait()
 	res.Added, res.Updated = int(added), int(updated)
 
-	// 3. 清理库中已不存在的文件
+	// 3. 清理库中已不存在的文件。
+	// 安全前提：仅在“遍历完整”时才允许删除，避免目录暂时不可达（未挂载/权限不足）
+	// 导致 paths 为空，进而把整个曲目库误判为失效而清空。
 	known, err := s.store.AllTrackPaths()
 	if err != nil {
 		return res, err
 	}
-	exist := make(map[string]struct{}, len(paths))
-	for _, p := range paths {
-		exist[p] = struct{}{}
-	}
-	var staleIDs []int64
-	for path, id := range known {
-		if _, ok := exist[path]; !ok {
-			staleIDs = append(staleIDs, id)
+	switch {
+	case incomplete:
+		log.Printf("[scanner] 目录遍历不完整，跳过失效记录清理，保留现有 %d 条曲目", len(known))
+	case len(paths) == 0 && len(known) > 0:
+		// 兜底：完整遍历却零发现、而库里仍有曲目，极可能是根目录异常，拒绝删除。
+		log.Printf("[scanner] 本次未发现任何音频文件但库中存在 %d 条记录，跳过清理以防误删", len(known))
+	default:
+		exist := make(map[string]struct{}, len(paths))
+		for _, p := range paths {
+			exist[p] = struct{}{}
 		}
+		var staleIDs []int64
+		for path, id := range known {
+			if _, ok := exist[path]; !ok {
+				staleIDs = append(staleIDs, id)
+			}
+		}
+		if err := s.store.DeleteMissing(staleIDs); err != nil {
+			log.Printf("[scanner] 清理失效记录失败: %v", err)
+		}
+		res.Removed = len(staleIDs)
 	}
-	if err := s.store.DeleteMissing(staleIDs); err != nil {
-		log.Printf("[scanner] 清理失效记录失败: %v", err)
-	}
-	res.Removed = len(staleIDs)
 	res.DurationMS = time.Since(start).Milliseconds()
 
 	log.Printf("[scanner] 扫描完成: 发现 %d, 新增 %d, 更新 %d, 移除 %d, 耗时 %dms",
@@ -166,13 +177,27 @@ func (s *Scanner) Scan(ctx context.Context) (model.ScanResult, error) {
 	return res, nil
 }
 
-// discover 递归遍历音频目录
-func (s *Scanner) discover() ([]string, error) {
-	var paths []string
-	err := filepath.WalkDir(s.musicDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			log.Printf("[scanner] 遍历跳过 %s: %v", path, err)
-			return nil // 单个文件/目录失败不中断整体扫描
+// discover 递归遍历音频目录，返回音频文件路径列表与“遍历是否不完整”标志。
+// incomplete=true 表示遍历过程中有目录/文件无法访问，调用方据此跳过失效清理，防止误删。
+func (s *Scanner) discover() (paths []string, incomplete bool, err error) {
+	// 前置校验根目录：不可达时直接报错中止本次扫描（原实现该错误会被 WalkDir 回调吞掉）。
+	info, err := os.Stat(s.musicDir)
+	if err != nil {
+		return nil, false, fmt.Errorf("音频目录不可达: %s (%w)", s.musicDir, err)
+	}
+	if !info.IsDir() {
+		return nil, false, fmt.Errorf("音频目录不是文件夹: %s", s.musicDir)
+	}
+
+	walkErr := filepath.WalkDir(s.musicDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			// 根目录之外的单项错误（权限不足、坏链等）不中断遍历，但标记为不完整。
+			incomplete = true
+			log.Printf("[scanner] 遍历跳过 %s: %v", path, walkErr)
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir // 目录不可读，跳过其整棵子树
+			}
+			return nil
 		}
 		if d.IsDir() {
 			return nil
@@ -182,10 +207,10 @@ func (s *Scanner) discover() ([]string, error) {
 		}
 		return nil
 	})
-	if err != nil && errors.Is(err, os.ErrNotExist) {
-		return nil, errors.New("音频目录不存在: " + s.musicDir)
+	if walkErr != nil {
+		return nil, incomplete, walkErr
 	}
-	return paths, err
+	return paths, incomplete, nil
 }
 
 // parseFile 解析单个文件：标签、时长、封面
@@ -217,9 +242,9 @@ func (s *Scanner) parseFile(path string) (*model.Track, error) {
 		}
 	}
 
-	// 时长：WAV 可从文件头精确读取；其余格式按平均码率估算
+	// 时长：WAV 可从文件头精确读取（解析失败返回 0，则回退估算）；其余格式按平均码率估算
 	if t.Format == "wav" {
-		if d, err := wavDuration(path); err == nil {
+		if d := wavDurationSec(path); d > 0 {
 			t.Duration = d
 		} else {
 			t.Duration = estimateDuration(t.Format, t.Size)

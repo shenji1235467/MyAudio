@@ -17,7 +17,8 @@ data_dir: "./data"
 password: "change-me-please"
 # password_hash: "$2a$10$...."   # bcrypt 哈希，优先级高于 password
 
-# 定时扫描间隔（0 关闭定时扫描，仍可通过页面按钮手动扫描）
+# 定时扫描间隔；设为 0s 关闭定时扫描（仍可通过页面按钮手动扫描），负值同样视为关闭。
+# 注意时长需带单位（如 5m / 30s / 1h），裸数字 0 无法解析。
 scan_interval: 5m
 
 # 登录会话有效期

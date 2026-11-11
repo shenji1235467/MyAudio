@@ -3,7 +3,7 @@ package web
 
 import "embed"
 
-// Assets 嵌入式前端资源（index.html / login.html / app.js / style.css）
+// Assets 嵌入式前端资源（index.html / login.html / app.js / style.css / i18n.js / locales）
 //
-//go:embed index.html login.html app.js style.css
+//go:embed index.html login.html app.js style.css i18n.js locales
 var Assets embed.FS

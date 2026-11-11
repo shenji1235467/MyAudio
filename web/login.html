@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#F4F6FB" id="metaThemeColor">
-<title>MyAudio · 登录</title>
+<title data-i18n="login.title">MyAudio · 登录</title>
 <script>
   // 与主页保持同一套主题偏好，默认明亮，避免登录前后明暗跳变
   (function () {
@@ -22,68 +22,98 @@
 <main class="login-wrap">
   <div class="glass login-card">
     <div class="logo-center"><span class="logo">MyAudio</span></div>
-    <p class="login-sub">私人在线音频播放服务</p>
+    <p class="login-sub" data-i18n="login.subtitle">私人在线音频播放服务</p>
 
-    <label class="field-label" for="password">访问密码</label>
-    <div class="search-wrap" style="max-width:none;margin-bottom:16px">
-      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-      <input id="password" class="search-input" type="password" placeholder="请输入访问密码" autocomplete="current-password">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button id="langBtn" class="icon-btn" data-i18n-title="nav.switchLang" title="Switch to English">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+      </button>
     </div>
 
-    <label class="remember">
-      <input id="remember" type="checkbox" checked>
-      七天内免登录
-    </label>
+    <label class="field-label" for="password" data-i18n="login.passwordLabel">访问密码</label>
+    <div class="search-wrap" style="max-width:none;margin-bottom:16px">
+      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      <input id="password" class="search-input" type="password" data-i18n-placeholder="login.passwordPlaceholder" placeholder="请输入访问密码" autocomplete="current-password">
+    </div>
 
-    <button id="loginBtn" class="btn-primary">进入音频库</button>
+    <button id="loginBtn" class="btn-primary" data-i18n="login.submit">进入音频库</button>
 
     <div id="errorHint" class="error-hint">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2V9z"/></svg>
-      <span id="errorText">密码错误，请重试</span>
+      <span id="errorText" data-i18n="login.wrongPassword">密码错误，请重试</span>
     </div>
 
-    <p class="login-foot">登录状态通过会话 Cookie 保持<br>连续失败 5 次将锁定 10 分钟</p>
+    <p class="login-foot" id="loginFoot"></p>
   </div>
 </main>
 
+<script src="/i18n.js"></script>
+<script src="/locales/zh-CN.js"></script>
+<script src="/locales/en.js"></script>
 <script>
+'use strict';
+I18N.applyDOM();
+// login.foot 含 <br>，需用 innerHTML 注入
+document.getElementById('loginFoot').innerHTML = t('login.foot');
+
 const btn = document.getElementById('loginBtn');
 const input = document.getElementById('password');
 const hint = document.getElementById('errorHint');
 const errText = document.getElementById('errorText');
 
-async function doLogin() {
-  const password = input.value;
-  if (!password) { showError('请输入密码'); return; }
-  btn.disabled = true;
-  btn.textContent = '登录中…';
-  try {
-    const resp = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    if (resp.ok) {
-      location.href = '/';
-      return;
-    }
-    const data = await resp.json().catch(() => ({}));
-    showError(data.error || ('登录失败（HTTP ' + resp.status + '）'));
-  } catch (e) {
-    showError('网络错误，请检查服务是否可用');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '进入音频库';
-  }
-}
+// 语言切换
+document.getElementById('langBtn').addEventListener('click', () => {
+  I18N.toggleLang();
+  document.getElementById('loginFoot').innerHTML = t('login.foot');
+  btn.textContent = t('login.submit');
+});
 
 function showError(msg) {
   errText.textContent = msg;
   hint.classList.add('show');
 }
 
+// 后端返回的错误码/中文错误 -> 当前语言文案
+function translateError(data, status) {
+  const raw = data && data.error ? data.error : '';
+  const codeMap = {
+    '密码错误': 'login.wrongPassword',
+    '失败次数过多，请 10 分钟后再试': 'login.tooManyAttempts',
+    '请求格式错误': 'login.badRequest',
+    '未登录或会话已过期': 'login.unauthorized',
+  };
+  if (codeMap[raw]) return t(codeMap[raw]);
+  if (raw) return raw; // 未知错误直接展示原文
+  return t('login.failedHttp', { status: status });
+}
+
+async function doLogin() {
+  const password = input.value;
+  if (!password) { showError(t('login.enterPassword')); return; }
+  btn.disabled = true;
+  btn.textContent = t('login.signingIn');
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    if (resp.ok) {
+      location.href = '/';
+      return;
+    }
+    const data = await resp.json().catch(() => ({}));
+    showError(translateError(data, resp.status));
+  } catch (e) {
+    showError(t('login.networkError'));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('login.submit');
+  }
+}
+
 btn.addEventListener('click', doLogin);
-input.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 input.focus();
 </script>
 </body>

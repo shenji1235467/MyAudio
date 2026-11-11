@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -22,9 +24,18 @@ import (
 	"myaudio/web"
 )
 
+// version 通过 -ldflags "-X main.version=vX.Y.Z" 在构建时注入；本地直接 go build 时为 dev。
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "配置文件路径")
+	showVersion := flag.Bool("version", false, "打印版本号并退出")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("myaudio %s (%s/%s)\n", version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
 
 	// 1. 配置
 	cfg, err := config.Load(*configPath)
@@ -76,6 +87,11 @@ func main() {
 	// 6. HTTP 服务
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// 默认不信任任何代理，避免客户端伪造 X-Forwarded-For 绕过基于 IP 的登录限速。
+	// 若部署在本机 nginx 等反代后且需按真实 IP 限速，可改为 r.SetTrustedProxies([]string{"127.0.0.1"})。
+	if err := r.SetTrustedProxies(nil); err != nil {
+		log.Printf("[warn] 设置可信代理失败: %v", err)
+	}
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")
@@ -96,7 +112,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("[server] MyAudio 监听 %s （音频目录: %s）", cfg.Listen, cfg.MusicDir)
+		log.Printf("[server] MyAudio %s 监听 %s （音频目录: %s）", version, cfg.Listen, cfg.MusicDir)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("[fatal] HTTP 服务异常: %v", err)
 		}

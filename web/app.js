@@ -23,6 +23,51 @@ function toast(msg, type = '') {
   toast._t = setTimeout(() => { el.className = 'toast'; }, 2600);
 }
 
+// 后端错误 -> 当前语言文案。优先匹配错误码（code），其次兼容历史中文字符串。
+function translateApiError(data, status) {
+  const code = data && data.code;
+  const raw = data && data.error ? data.error : '';
+  if (code && ERROR_CODE_KEYS[code]) return t(ERROR_CODE_KEYS[code], { msg: data.msg || '' });
+  const legacyKey = LEGACY_ERROR_KEYS[raw];
+  if (legacyKey) return t(legacyKey);
+  // 带动态后缀的中文错误（如“查询失败: xxx”）无法精确匹配时，直接展示原文
+  return raw || ('HTTP ' + status);
+}
+
+// 后端结构化错误码（Go 端返回 code 字段）
+const ERROR_CODE_KEYS = {
+  'TRACK_NOT_FOUND': 'err.trackNotFound',
+  'FILE_MISSING': 'err.fileMissing',
+  'INVALID_ID': 'err.invalidID',
+  'INVALID_TRACK_ID': 'err.invalidTrackID',
+  'EMPTY_NAME': 'err.emptyName',
+  'NAME_EXISTS': 'pl.nameExists',
+  'NOT_FOUND': 'pl.notFound',
+  'SCAN_IN_PROGRESS': 'scan.inProgress',
+  'BAD_REQUEST': 'login.badRequest',
+  'UNAUTHORIZED': 'login.unauthorized',
+  'INVALID_PASSWORD': 'login.wrongPassword',
+  'TOO_MANY_ATTEMPTS': 'login.tooManyAttempts',
+  'QUERY_FAILED': 'err.queryFailed',
+  'DIR_QUERY_FAILED': 'err.dirQueryFailed',
+};
+
+// 兼容改造前后端直接返回的中文字符串
+const LEGACY_ERROR_KEYS = {
+  '曲目不存在': 'err.trackNotFound',
+  '音频文件不存在或已被移动': 'err.fileMissing',
+  '无效的 ID': 'err.invalidID',
+  '无效的曲目 ID': 'err.invalidTrackID',
+  '名称不能为空': 'err.emptyName',
+  '播放列表名称已存在': 'pl.nameExists',
+  '记录不存在': 'pl.notFound',
+  '扫描任务正在进行中': 'scan.inProgress',
+  '请求格式错误': 'login.badRequest',
+  '未登录或会话已过期': 'login.unauthorized',
+  '密码错误': 'login.wrongPassword',
+  '失败次数过多，请 10 分钟后再试': 'login.tooManyAttempts',
+};
+
 async function api(path, options = {}) {
   const resp = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
@@ -30,23 +75,33 @@ async function api(path, options = {}) {
   });
   if (resp.status === 401) { location.href = '/login'; throw new Error('unauthorized'); }
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+  if (!resp.ok) throw new Error(translateApiError(data, resp.status));
   return data;
 }
 
-// 无封面时的 SVG 占位（data URI，零外部依赖）
+// 无封面时的 SVG 占位（data URI，零外部依赖）。encodeURIComponent 会编码双引号，
+// 保证结果 URI 中既不含单引号也不含双引号，可安全用于 <img src> 与回退赋值。
 const COVER_PLACEHOLDER =
-  "data:image/svg+xml," + encodeURIComponent(
-    `<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'>
-      <defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>
-        <stop offset='0' stop-color='#7C5CFF'/><stop offset='1' stop-color='#00D4FF'/>
+  'data:image/svg+xml,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#7C5CFF"/><stop offset="1" stop-color="#00B8E6"/>
       </linearGradient></defs>
-      <rect width='300' height='300' fill='url(#g)'/>
-      <text x='150' y='170' font-size='110' text-anchor='middle'>♪</text></svg>`);
+      <rect width="300" height="300" fill="url(#g)"/>
+      <text x="150" y="170" font-size="110" text-anchor="middle" fill="#ffffff">♪</text></svg>`);
 
 function coverUrl(t) {
   return t.has_cover ? `/api/cover/${t.id}` : COVER_PLACEHOLDER;
 }
+
+// 全局图片加载失败兜底：封面 404/出错时回退到占位图。
+// 用事件委托替代内联 onerror，避免 data URI 引号与内联事件字符串冲突。
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (img && img.tagName === 'IMG' && img.classList.contains('cover-fallback') && img.src !== COVER_PLACEHOLDER) {
+    img.src = COVER_PLACEHOLDER;
+  }
+}, true); // 捕获阶段：error 事件不冒泡，只能在捕获阶段监听
 
 // 文件名展示行：仅在文件名与标题不同（存在独立文件名且标签标题不一致）时显示
 function fileLine(t) {
@@ -57,6 +112,21 @@ function fileLine(t) {
   return `<div class="card-file" title="${esc(baseName)}">${esc(baseName)}</div>`;
 }
 
+// 支持的倍速档位，最高 3x（须在 state 之前定义：state 初始化会调用 normalizeSpeed）
+const SPEEDS = [1, 1.25, 1.5, 2, 2.5, 3];
+function normalizeSpeed(v) {
+  return SPEEDS.includes(v) ? v : 1;
+}
+function speedLabel(v) {
+  return v + 'x';
+}
+
+// 播放模式白名单（同样须前置：state 初始化会调用 normalizeMode）
+const MODE_ORDER = ['list', 'loop', 'random'];
+function normalizeMode(mode) {
+  return MODE_ORDER.includes(mode) ? mode : 'list';
+}
+
 // ---------------- 全局状态 ----------------
 const state = {
   tracks: [],          // 当前已加载曲目
@@ -65,18 +135,60 @@ const state = {
   perPage: 48,
   pages: 1,
   keyword: '',
-  order: 'created_at',
-  dir: '',              // 当前选中的相对目录（'' = 全部/根目录）
+  // 默认按文件名排序；用户切换后持久化，跨刷新保持（白名单校验防止脏值）
+  order: ['created_at', 'filename', 'title', 'artist', 'album'].includes(localStorage.getItem('myaudio_order'))
+    ? localStorage.getItem('myaudio_order') : 'filename',
+  dir: localStorage.getItem('myaudio_dir') || '', // 当前选中的相对目录（'' = 全部/根目录），跨刷新记忆
   theme: localStorage.getItem('myaudio_theme') === 'dark' ? 'dark' : 'light',
   view: localStorage.getItem('myaudio_view') || 'grid',
   queue: [],           // 播放队列
   queuePos: -1,
-  mode: localStorage.getItem('myaudio_mode') || 'list', // list / loop / random
+  mode: normalizeMode(localStorage.getItem('myaudio_mode')), // list / loop / random
+  speed: normalizeSpeed(parseFloat(localStorage.getItem('myaudio_speed'))), // 播放倍速
   currentPlaylistId: null,
   pendingTrackId: null, // “加入播放列表”选择器当前操作的曲目 ID
 };
 
 const audio = $('audio');
+
+// ---------------- 浏览器记忆播放位置（localStorage，按曲目分别记忆） ----------------
+const POS_MAP_KEY = 'myaudio_positions';   // { [trackId]: 秒 }
+const POS_LAST_KEY = 'myaudio_last_track'; // 上次播放的曲目 ID
+const POS_SAVE_GAP = 3;                    // 播放中最多每 3 秒落盘一次，避免频繁写入
+const POS_MIN_RESUME = 5;                  // 距开头不足 5 秒视为从头播放，不提示续播
+const POS_MAX_ENTRIES = 200;               // 最多记忆的曲目数，超出淘汰最旧条目
+
+function readPositions() {
+  try { return JSON.parse(localStorage.getItem(POS_MAP_KEY) || '{}') || {}; }
+  catch (_) { return {}; }
+}
+function writePositions(map) {
+  try { localStorage.setItem(POS_MAP_KEY, JSON.stringify(map)); } catch (_) { /* 配额不足等忽略 */ }
+}
+function getSavedPosition(trackId) {
+  const pos = readPositions()[trackId];
+  return Number.isFinite(pos) && pos > 0 ? pos : 0;
+}
+// 记录某曲目播放位置；条目过多时按最久未更新淘汰
+function savePosition(trackId, sec) {
+  if (!trackId || !Number.isFinite(sec) || sec <= 0) return;
+  const map = readPositions();
+  map[trackId] = Math.floor(sec);
+  const keys = Object.keys(map);
+  if (keys.length > POS_MAX_ENTRIES) {
+    // 无时间戳时退化为删除字典序最靠前的若干条目，仅做容量兜底
+    keys.slice(0, keys.length - POS_MAX_ENTRIES).forEach((k) => { delete map[k]; });
+  }
+  writePositions(map);
+}
+function clearPosition(trackId) {
+  if (!trackId) return;
+  const map = readPositions();
+  if (trackId in map) { delete map[trackId]; writePositions(map); }
+}
+// 待元数据就绪后跳转的续播位置（秒）；0 表示从头播放
+let pendingResume = 0;
+let lastSavedAt = 0;
 
 // ---------------- 音频库加载与渲染 ----------------
 async function loadTracks(reset = true) {
@@ -105,8 +217,8 @@ async function refreshStats() {
   try {
     const s = await api('/api/stats');
     $('statsText').textContent =
-      `共 ${s.track_count} 首 · 总时长 ${fmtDuration(s.total_duration)}` +
-      (s.scanning ? ' · 正在扫描…' : '');
+      t('library.stats', { count: s.track_count, duration: fmtDuration(s.total_duration) }) +
+      (s.scanning ? t('library.scanning') : '');
   } catch (_) { /* 忽略统计失败 */ }
 }
 
@@ -116,43 +228,42 @@ function renderTracks() {
   grid.className = state.view === 'list' ? 'track-grid list-view' : 'track-grid';
 
   const currentId = state.queuePos >= 0 ? state.queue[state.queuePos]?.id : null;
-  grid.innerHTML = state.tracks.map((t) => {
-    const active = t.id === currentId ? ' active' : '';
+  grid.innerHTML = state.tracks.map((tr) => {
+    const active = tr.id === currentId ? ' active' : '';
     if (state.view === 'list') {
       return `
-      <div class="track-card${active}" data-id="${t.id}">
+      <div class="track-card${active}" data-id="${tr.id}">
         <div class="cover-wrap">
-          <img class="cover-img" src="${coverUrl(t)}" alt="封面" onerror="this.src='${COVER_PLACEHOLDER}'">
+          <img class="cover-img cover-fallback" src="${coverUrl(tr)}" alt="${t('common.cover')}">
         </div>
         <div class="card-body">
-          <div class="card-title">${esc(t.title)}</div>
-          <div class="card-artist">${esc(t.artist || '未知艺术家')}${t.album ? ' · ' + esc(t.album) : ''}</div>
-          ${fileLine(t)}
+          <div class="card-title">${esc(tr.title)}</div>
+          <div class="card-artist">${esc(tr.artist || t('library.unknownArtist'))}${tr.album ? ' · ' + esc(tr.album) : ''}</div>
+          ${fileLine(tr)}
         </div>
-        <span class="badge dur" style="position:static">${fmtDuration(t.duration)}</span>
-        <div class="card-actions" style="flex:0 0 auto">
-          <button class="mini-btn" data-act="playlist" data-id="${t.id}">加列表</button>
-          <button class="mini-btn danger" data-act="delete" data-id="${t.id}">删除</button>
+        <div class="card-actions">
+          <button class="mini-btn" data-act="playlist" data-id="${tr.id}">${t('library.addToList')}</button>
+          <button class="mini-btn danger" data-act="delete" data-id="${tr.id}">${t('common.delete')}</button>
         </div>
       </div>`;
     }
     return `
-    <div class="track-card${active}" data-id="${t.id}">
+    <div class="track-card${active}" data-id="${tr.id}">
       <div class="cover-wrap">
-        <img class="cover-img" src="${coverUrl(t)}" alt="${esc(t.title)}封面" onerror="this.src='${COVER_PLACEHOLDER}'">
+        <img class="cover-img cover-fallback" src="${coverUrl(tr)}" alt="${esc(t('library.coverOf', { title: tr.title }))}">
         <div class="play-overlay"><div class="play-btn-lg">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
         </div></div>
-        <span class="badge fmt">${esc(t.format)}</span>
-        <span class="badge dur">${fmtDuration(t.duration)}</span>
+        <span class="badge fmt">${esc(tr.format)}</span>
+        <span class="badge dur">${fmtDuration(tr.duration)}</span>
       </div>
       <div class="card-body">
-        <div class="card-title">${esc(t.title)}</div>
-        <div class="card-artist">${esc(t.artist || '未知艺术家')}</div>
-        ${fileLine(t)}
+        <div class="card-title">${esc(tr.title)}</div>
+        <div class="card-artist">${esc(tr.artist || t('library.unknownArtist'))}</div>
+        ${fileLine(tr)}
         <div class="card-actions">
-          <button class="mini-btn" data-act="playlist" data-id="${t.id}">加入列表</button>
-          <button class="mini-btn danger" data-act="delete" data-id="${t.id}">删除</button>
+          <button class="mini-btn" data-act="playlist" data-id="${tr.id}">${t('library.addToList')}</button>
+          <button class="mini-btn danger" data-act="delete" data-id="${tr.id}">${t('common.delete')}</button>
         </div>
       </div>
     </div>`;
@@ -177,11 +288,12 @@ $('trackGrid').addEventListener('click', async (e) => {
 });
 
 async function deleteTrack(id) {
-  if (!confirm('确定删除该曲目记录？\n点击“确定”仅移除记录；如需同时删除磁盘文件，请在后续确认中选择。')) return;
-  const deleteFile = confirm('是否同时删除服务器上的音频文件？\n（确定=删除文件，取消=仅移除库记录）');
+  if (!confirm(t('track.deleteConfirm1'))) return;
+  const deleteFile = confirm(t('track.deleteConfirm2'));
   try {
     await api(`/api/tracks/${id}?delete_file=${deleteFile}`, { method: 'DELETE' });
-    toast('已删除', 'success');
+    toast(t('track.deleted'), 'success');
+    clearPosition(id);
     state.tracks = state.tracks.filter((t) => t.id !== id);
     renderTracks();
     refreshStats();
@@ -191,17 +303,33 @@ async function deleteTrack(id) {
 }
 
 // ---------------- 播放器 ----------------
+// 加载某曲目到播放器并填充元信息；resume=true 时尝试恢复到上次播放位置
+function loadTrack(tr, resume) {
+  audio.src = `/api/stream/${tr.id}`;
+  $('npTitle').textContent = tr.title;
+  $('npArtist').textContent = tr.artist || t('library.unknownArtist');
+  $('npCover').src = coverUrl(tr);
+  $('npCover').classList.add('now-playing-cover');
+  updateActiveCard(tr.id);
+  // 计算续播位置：仅当距开头足够远、且不超过曲目总时长时才跳转（时长在 loadedmetadata 后校验）
+  const saved = resume ? getSavedPosition(tr.id) : 0;
+  pendingResume = saved >= POS_MIN_RESUME ? saved : 0;
+  hideResumeBadge();
+}
+
 function playIndex(i) {
   if (i < 0 || i >= state.queue.length) return;
   state.queuePos = i;
-  const t = state.queue[i];
-  audio.src = `/api/stream/${t.id}`;
-  audio.play().catch((err) => toast('播放失败: ' + err.message, 'error'));
-  $('npTitle').textContent = t.title;
-  $('npArtist').textContent = t.artist || '未知艺术家';
-  $('npCover').src = coverUrl(t);
-  $('npCover').classList.add('now-playing-cover');
-  renderTracks();
+  const tr = state.queue[i];
+  loadTrack(tr, true);
+  audio.play().catch((err) => toast(t('player.playbackFailed', { msg: err.message }), 'error'));
+}
+
+// 仅更新当前播放卡片的高亮，避免切歌时全量重建网格导致封面重新请求、滚动抖动
+function updateActiveCard(activeId) {
+  $('trackGrid').querySelectorAll('.track-card').forEach((card) => {
+    card.classList.toggle('active', Number(card.dataset.id) === activeId);
+  });
 }
 
 function togglePlay() {
@@ -210,7 +338,7 @@ function togglePlay() {
       state.queue = state.tracks.slice();
       playIndex(0);
     } else {
-      toast('音频库为空');
+      toast(t('player.libraryEmpty'));
     }
     return;
   }
@@ -246,35 +374,210 @@ const MODE_ICONS = {
   loop: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
   random: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>',
 };
-const MODE_LABEL = { list: '列表循环关闭', loop: '列表循环', random: '随机播放' };
+const MODE_LABEL_KEY = { list: 'mode.list', loop: 'mode.loop', random: 'mode.random' };
+const modeLabel = (mode) => t(MODE_LABEL_KEY[mode]);
 
-function setMode(mode) {
-  state.mode = mode;
-  localStorage.setItem('myaudio_mode', mode);
-  $('modeIcon').outerHTML = MODE_ICONS[mode].replace('<svg ', '<svg id="modeIcon" ');
-  $('modeBtn').title = MODE_LABEL[mode];
-  toast(MODE_LABEL[mode]);
+function setMode(mode, silent = false) {
+  state.mode = normalizeMode(mode);
+  localStorage.setItem('myaudio_mode', state.mode);
+  $('modeIcon').outerHTML = MODE_ICONS[state.mode].replace('<svg ', '<svg id="modeIcon" ');
+  $('modeBtn').title = modeLabel(state.mode);
+  if (!silent) toast(modeLabel(state.mode));
 }
 
 $('playBtn').addEventListener('click', togglePlay);
 $('nextBtn').addEventListener('click', () => playNext(false));
 $('prevBtn').addEventListener('click', playPrev);
 $('modeBtn').addEventListener('click', () => {
-  const order = ['list', 'loop', 'random'];
-  setMode(order[(order.indexOf(state.mode) + 1) % 3]);
+  setMode(MODE_ORDER[(MODE_ORDER.indexOf(state.mode) + 1) % MODE_ORDER.length]);
 });
 
+// ---------------- 播放倍速（下拉选择，最高 3x，持久化并对当前/后续曲目生效） ----------------
+const speedSelect = $('speedSelect');
+function setSpeed(v, silent = false) {
+  state.speed = normalizeSpeed(v);
+  audio.playbackRate = state.speed;
+  localStorage.setItem('myaudio_speed', String(state.speed));
+  speedSelect.value = String(state.speed);
+  speedSelect.classList.toggle('active', state.speed !== 1);
+  if (!silent) toast(t('player.speedLabel', { speed: speedLabel(state.speed) }));
+}
+speedSelect.addEventListener('change', () => setSpeed(parseFloat(speedSelect.value)));
+
+// ---------------- 定时停止播放（原生下拉，样式同倍速；基于目标时间戳，刷新/切标签不漂移） ----------------
+const SLEEP_UNTIL_KEY = 'myaudio_sleep_until';
+const SLEEP_MIN_KEY = 'myaudio_sleep_min';
+const sleepSelect = $('sleepSelect');
+// 依据当前语言生成某档位（value=分钟数，0=定时入口）的 option 文案
+function sleepOptionLabel(value) {
+  const n = Number(value);
+  return n === 0 ? t('player.sleepTimer') : t('player.minutes', { n: String(n) });
+}
+let sleepUntil = 0;          // 停止时刻的绝对时间戳（ms），0 表示未启用
+let sleepTimerId = null;     // 倒计时定时器
+
+function sleepRemainingSec() {
+  return sleepUntil ? Math.max(0, Math.round((sleepUntil - Date.now()) / 1000)) : 0;
+}
+function fmtCountdown(sec) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  const mm = h ? String(m).padStart(2, '0') : String(m);
+  return (h ? h + ':' : '') + mm + ':' + String(s).padStart(2, '0');
+}
+function stopSleepTimer() {
+  if (sleepTimerId) { clearInterval(sleepTimerId); sleepTimerId = null; }
+}
+// 还原所有 option 文案为当前语言下的初始值（消除倒计时改写）
+function resetSleepOptionText() {
+  Array.from(sleepSelect.options).forEach((o) => { o.textContent = sleepOptionLabel(o.value); });
+}
+// 到点：暂停播放并清理定时状态
+function fireSleep() {
+  stopSleepTimer();
+  sleepUntil = 0;
+  localStorage.removeItem(SLEEP_UNTIL_KEY);
+  localStorage.removeItem(SLEEP_MIN_KEY);
+  if (!audio.paused) audio.pause();
+  sleepSelect.value = '0';
+  resetSleepOptionText();
+  sleepSelect.classList.remove('active');
+  toast(t('player.sleepEnded'));
+}
+// 刷新当前选中项上的倒计时；返回是否仍在计时
+function renderSleep() {
+  if (!sleepUntil) return false;
+  const remain = sleepRemainingSec();
+  if (remain <= 0) { fireSleep(); return false; }
+  // 仅改写当前选中 option 的展示文本，下拉收起时即显示在控件上
+  sleepSelect.selectedOptions[0].textContent = fmtCountdown(remain);
+  return true;
+}
+// 启动/重设定时：minutes 为分钟数；0 表示取消
+function setSleep(minutes) {
+  stopSleepTimer();
+  resetSleepOptionText();
+  if (minutes <= 0) {
+    sleepUntil = 0;
+    localStorage.removeItem(SLEEP_UNTIL_KEY);
+    localStorage.removeItem(SLEEP_MIN_KEY);
+    sleepSelect.value = '0';
+    sleepSelect.classList.remove('active');
+    toast(t('player.sleepCancelled'));
+    return;
+  }
+  sleepUntil = Date.now() + minutes * 60 * 1000;
+  localStorage.setItem(SLEEP_UNTIL_KEY, String(sleepUntil));
+  localStorage.setItem(SLEEP_MIN_KEY, String(minutes));
+  sleepSelect.value = String(minutes);
+  sleepSelect.classList.add('active');
+  renderSleep();
+  sleepTimerId = setInterval(() => {
+    if (!renderSleep()) stopSleepTimer();
+  }, 1000);
+  toast(t('player.sleepInMinutes', { minutes: minutes }));
+}
+sleepSelect.addEventListener('change', () => setSleep(Number(sleepSelect.value)));
+// 恢复持久化的定时（仅当尚未到期）；已到期则清理，不打断当前状态
+(function restoreSleep() {
+  const savedUntil = Number(localStorage.getItem(SLEEP_UNTIL_KEY));
+  const savedMin = String(localStorage.getItem(SLEEP_MIN_KEY) || '');
+  if (!savedUntil) return;
+  if (savedUntil <= Date.now()) {
+    localStorage.removeItem(SLEEP_UNTIL_KEY);
+    localStorage.removeItem(SLEEP_MIN_KEY);
+    return;
+  }
+  sleepUntil = savedUntil;
+  // 恢复到原档位（非法值则回落到“定时”）
+  const validMins = Array.from(sleepSelect.options).some((o) => o.value === savedMin);
+  if (validMins && savedMin !== '0') {
+    sleepSelect.value = savedMin;
+  }
+  sleepSelect.classList.add('active');
+  renderSleep();
+  sleepTimerId = setInterval(() => {
+    if (!renderSleep()) stopSleepTimer();
+  }, 1000);
+})();
+
+// 部分浏览器在切歌/加载后会重置 playbackRate，在 play 与元数据就绪时再次确保生效
 audio.addEventListener('play', () => {
+  audio.playbackRate = state.speed;
   $('playIcon').innerHTML = '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
+  hideResumeBadge();   // 用户已开始播放，不再展示续播提示
+  lastSavedAt = 0;
 });
 audio.addEventListener('pause', () => {
   $('playIcon').innerHTML = '<path d="M8 5.5v13l11-6.5z"/>';
+  persistCurrentPosition();   // 暂停即落盘，保证关闭页面前进度已保存
 });
-audio.addEventListener('ended', () => playNext(true));
-audio.addEventListener('loadedmetadata', () => { $('durTime').textContent = fmtDuration(audio.duration); });
-audio.addEventListener('timeupdate', updateProgress);
+audio.addEventListener('ended', () => {
+  const tr = state.queue[state.queuePos];
+  if (tr) clearPosition(tr.id);   // 完整播完，清除该曲目的记忆位置
+  playNext(true);
+});
+audio.addEventListener('loadedmetadata', () => {
+  // 部分浏览器加载新源后会重置 playbackRate，这里重新确保倍速生效，并刷新总时长
+  audio.playbackRate = state.speed;
+  $('durTime').textContent = fmtDuration(audio.duration);
+  // 元数据就绪后执行续播跳转（此时才能用总时长校验，避免跳到越界位置）
+  if (pendingResume > 0 && Number.isFinite(audio.duration)) {
+    if (pendingResume < audio.duration - 2) audio.currentTime = pendingResume;
+    pendingResume = 0;
+  }
+  updateMediaSession();
+});
+audio.addEventListener('timeupdate', () => {
+  updateProgress();
+  // 节流落盘：每 POS_SAVE_GAP 秒保存一次当前曲目进度
+  if (audio.currentTime - lastSavedAt >= POS_SAVE_GAP) {
+    lastSavedAt = audio.currentTime;
+    persistCurrentPosition();
+  }
+});
 audio.addEventListener('error', () => {
-  if (audio.src) toast('音频加载失败，文件可能已被移动', 'error');
+  if (audio.src) toast(t('player.audioLoadFailed'), 'error');
+});
+
+// 保存当前曲目进度，并记录“上次播放曲目”用于刷新后续播
+function persistCurrentPosition() {
+  const tr = state.queue[state.queuePos];
+  if (!tr || !Number.isFinite(audio.currentTime) || !Number.isFinite(audio.duration)) return;
+  // 临近结尾不再记忆（下次从头开始）
+  if (audio.duration && audio.currentTime >= audio.duration - 2) return;
+  savePosition(tr.id, audio.currentTime);
+  localStorage.setItem(POS_LAST_KEY, String(tr.id));
+}
+// 页面关闭 / 刷新 / 切后台前再保存一次，最大限度避免进度丢失
+window.addEventListener('pagehide', persistCurrentPosition);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') persistCurrentPosition();
+});
+
+// ---------------- 续播徽标 ----------------
+function hideResumeBadge() { $('resumeBadge').style.display = 'none'; }
+function renderResumeBadge() {
+  const tr = state.queue[state.queuePos];
+  const badge = $('resumeBadge');
+  if (!tr) { hideResumeBadge(); return; }
+  const saved = getSavedPosition(tr.id);
+  if (saved < POS_MIN_RESUME) { hideResumeBadge(); return; }
+  $('resumeBadgeText').textContent = t('player.resumeAt', { time: fmtDuration(saved) });
+  badge.style.display = 'inline-flex';
+}
+// 点击徽标：从上次位置继续播放
+$('resumeBadge').addEventListener('click', () => {
+  const tr = state.queue[state.queuePos];
+  if (!tr) return;
+  const saved = getSavedPosition(tr.id);
+  if (saved >= POS_MIN_RESUME) {
+    if (Number.isFinite(audio.duration) && saved < audio.duration - 2) audio.currentTime = saved;
+    else pendingResume = saved;   // 元数据未就绪时暂存，loadedmetadata 中跳转
+  }
+  hideResumeBadge();
+  audio.play().catch((err) => toast(t('player.playbackFailed', { msg: err.message }), 'error'));
 });
 
 // 进度条（点击/拖动跳转）
@@ -300,22 +603,112 @@ window.addEventListener('pointermove', (e) => dragging && seekFromEvent(e));
 window.addEventListener('pointerup', () => { dragging = false; });
 
 // 媒体会话 API：手机锁屏/蓝牙线控
-if ('mediaSession' in navigator) {
-  audio.addEventListener('loadedmetadata', () => {
-    const t = state.queue[state.queuePos];
-    if (!t) return;
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: t.title, artist: t.artist || '未知艺术家', album: t.album || '',
-      artwork: [{ src: coverUrl(t), sizes: '300x300', type: 'image/jpeg' }],
-    });
+function updateMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const tr = state.queue[state.queuePos];
+  if (!tr) return;
+  const src = coverUrl(tr);
+  // 占位图为 SVG，真实封面为图片接口；按来源声明正确 MIME，避免写死 image/jpeg
+  const type = src.startsWith('data:') ? 'image/svg+xml' : 'image/jpeg';
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: tr.title, artist: tr.artist || t('library.unknownArtist'), album: tr.album || '',
+    artwork: [{ src, sizes: '300x300', type }],
   });
+}
+if ('mediaSession' in navigator) {
   navigator.mediaSession.setActionHandler('play', () => audio.play());
   navigator.mediaSession.setActionHandler('pause', () => audio.pause());
   navigator.mediaSession.setActionHandler('previoustrack', playPrev);
   navigator.mediaSession.setActionHandler('nexttrack', () => playNext(false));
 }
 
-// ---------------- 目录导航 ----------------
+// ---------------- 目录侧边栏（由后端扁平目录构建树） ----------------
+const DIR_EXPAND_KEY = 'myaudio_dir_expanded';
+let rawDirs = [];       // 后端返回的原始扁平目录（缓存，供语言切换时重新构建树）
+let dirTreeData = [];   // 最近一次构建的树
+
+// 读取/写入展开的目录路径集合
+function loadExpandedSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(DIR_EXPAND_KEY) || '[]')); }
+  catch (_) { return new Set(); }
+}
+function saveExpandedSet(set) {
+  localStorage.setItem(DIR_EXPAND_KEY, JSON.stringify([...set]));
+}
+let expandedDirs = loadExpandedSet();
+
+// 由“含曲目的扁平相对路径”补齐中间层级，构建完整目录树
+function buildDirTree(dirs) {
+  const root = { path: '', name: t('common.rootDir'), count: 0, children: [], hasTracks: false };
+  const nodeMap = new Map([['', root]]);
+  let rootCount = 0;
+
+  dirs.forEach((d) => {
+    if (d.dir === '') { rootCount = d.count; return; }
+    const parts = d.dir.split('/');
+    let acc = '';
+    parts.forEach((part) => {
+      const parent = acc;
+      acc = acc ? acc + '/' + part : part;
+      if (!nodeMap.has(acc)) {
+        const node = { path: acc, name: part, count: 0, children: [], hasTracks: false };
+        nodeMap.get(parent).children.push(node);
+        nodeMap.set(acc, node);
+      }
+    });
+    const leaf = nodeMap.get(d.dir);
+    leaf.count = d.count;       // 后端 count 已含该目录及所有子目录
+    leaf.hasTracks = true;
+  });
+
+  // 中间层级（无直接曲目）的 count = 各直接子节点 count 之和
+  const fillCount = (node) => {
+    if (!node.children.length) return node.count;
+    node.children.forEach(fillCount);
+    if (!node.hasTracks) node.count = node.children.reduce((s, c) => s + c.count, 0);
+    return node.count;
+  };
+  fillCount(root);
+  root.count = rootCount || root.count;
+  // 每层按名称不区分大小写排序，保证稳定直观
+  const sortNode = (node) => {
+    node.children.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    node.children.forEach(sortNode);
+  };
+  sortNode(root);
+  return [root];
+}
+
+const FOLDER_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const CARET_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+
+function renderTreeNode(node, depth) {
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expandedDirs.has(node.path);
+  const isActive = node.path === state.dir;
+  const caret = hasChildren
+    ? `<span class="tree-caret" data-caret="${esc(node.path)}">${CARET_SVG}</span>`
+    : `<span class="tree-caret placeholder"></span>`;
+  const title = node.path === '' ? t('common.rootDir') : node.path;
+  let html = `
+  <div class="tree-item${isActive ? ' active' : ''}${isExpanded ? ' expanded' : ''}"
+       style="--depth:${depth}" data-dir="${esc(node.path)}" title="${esc(title)}"
+       role="treeitem" aria-expanded="${hasChildren ? isExpanded : 'false'}">
+    ${caret}
+    <span class="tree-folder">${FOLDER_SVG}</span>
+    <span class="tree-name">${esc(node.name)}</span>
+    <span class="tree-count">${node.count}</span>
+  </div>`;
+  if (hasChildren && isExpanded) {
+    html += `<div class="tree-children" role="group">${node.children.map((c) => renderTreeNode(c, depth + 1)).join('')}</div>`;
+  }
+  return html;
+}
+
+function renderDirTree() {
+  $('dirTree').innerHTML = dirTreeData.map((n) => renderTreeNode(n, 0)).join('');
+}
+
 async function loadDirs() {
   let dirs;
   try {
@@ -323,22 +716,55 @@ async function loadDirs() {
   } catch (err) {
     return; // 目录加载失败不阻断主界面
   }
-  const bar = $('dirBar');
-  if (!dirs.length) { bar.innerHTML = ''; return; }
-  bar.innerHTML = dirs.map((d) => `
-    <span class="dir-chip ${d.dir === state.dir ? 'active' : ''}" data-dir="${esc(d.dir)}" title="${esc(d.dir || '根目录')}">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-      ${esc(d.name)}<span class="dir-count">${d.count}</span>
-    </span>`).join('');
+  if (!dirs.length) { $('dirTree').innerHTML = ''; dirTreeData = []; rawDirs = []; return; }
+  rawDirs = dirs;
+  dirTreeData = buildDirTree(dirs);
+  // 首次访问（无展开偏好记录）时默认展开全部目录；之后以用户手动折叠/展开的记忆为准
+  if (localStorage.getItem(DIR_EXPAND_KEY) === null) {
+    const collectPaths = (nodes, acc) => {
+      nodes.forEach((n) => {
+        if (n.children.length) { acc.add(n.path); collectPaths(n.children, acc); }
+      });
+      return acc;
+    };
+    expandedDirs = collectPaths(dirTreeData, new Set());
+    saveExpandedSet(expandedDirs);
+  }
+  renderDirTree();
 }
 
-$('dirBar').addEventListener('click', (e) => {
-  const chip = e.target.closest('.dir-chip');
-  if (!chip) return;
-  state.dir = chip.dataset.dir || '';
-  loadDirs();          // 更新高亮
-  loadTracks(true);    // 按新目录重新加载
+// 选中目录：更新高亮并按新目录加载曲目；折叠/展开箭头独立处理
+$('dirTree').addEventListener('click', (e) => {
+  const caret = e.target.closest('[data-caret]');
+  if (caret) {
+    e.stopPropagation();
+    const path = caret.dataset.caret;
+    if (expandedDirs.has(path)) { expandedDirs.delete(path); } else { expandedDirs.add(path); }
+    saveExpandedSet(expandedDirs);
+    renderDirTree();
+    return;
+  }
+  const item = e.target.closest('.tree-item');
+  if (!item) return;
+  state.dir = item.dataset.dir || '';
+  localStorage.setItem('myaudio_dir', state.dir);
+  renderDirTree();      // 更新蓝色激活高亮
+  loadTracks(true);     // 按新目录重新加载
+  closeSidebar();       // 手机端选择后自动收起抽屉
 });
+
+// ---------------- 侧边栏抽屉（手机端） ----------------
+function openSidebar() {
+  $('sidebar').classList.add('open');
+  $('sidebarMask').classList.add('open');
+}
+function closeSidebar() {
+  $('sidebar').classList.remove('open');
+  $('sidebarMask').classList.remove('open');
+}
+$('sidebarToggle').addEventListener('click', openSidebar);
+$('sidebarClose').addEventListener('click', closeSidebar);
+$('sidebarMask').addEventListener('click', closeSidebar);
 
 // ---------------- 搜索 / 排序 / 视图 ----------------
 let searchTimer;
@@ -356,8 +782,17 @@ $('orderChips').addEventListener('click', (e) => {
   document.querySelectorAll('#orderChips .chip').forEach((c) => c.classList.remove('active'));
   chip.classList.add('active');
   state.order = chip.dataset.order;
+  localStorage.setItem('myaudio_order', state.order);
   loadTracks(true);
 });
+
+// 根据 state.order 同步排序芯片的激活态（刷新后恢复用户上次选择，默认“文件名”）
+function syncOrderChips() {
+  document.querySelectorAll('#orderChips .chip').forEach((c) => {
+    c.classList.toggle('active', c.dataset.order === state.order);
+  });
+}
+syncOrderChips();
 
 function setView(view) {
   state.view = view;
@@ -383,7 +818,7 @@ function setTheme(theme) {
   localStorage.setItem('myaudio_theme', theme);
   document.documentElement.setAttribute('data-theme', theme);
   $('themeIcon').outerHTML = THEME_ICONS[theme].replace('<svg ', '<svg id="themeIcon" ');
-  $('themeBtn').title = theme === 'dark' ? '切换到明亮主题' : '切换到暗色主题';
+  $('themeBtn').title = theme === 'dark' ? t('theme.toLight') : t('theme.toDark');
   const meta = document.getElementById('metaThemeColor');
   if (meta) meta.setAttribute('content', THEME_COLOR[theme]);
 }
@@ -391,11 +826,13 @@ $('themeBtn').addEventListener('click', () => {
   setTheme(state.theme === 'dark' ? 'light' : 'dark');
 });
 
-// 手动扫描
+// 手动扫描（前端防重入，避免并发轮询叠加）
+let scanPolling = false;
 $('scanBtn').addEventListener('click', async () => {
+  if (scanPolling) return;
   try {
     await api('/api/scan', { method: 'POST' });
-    toast('扫描已启动…', 'success');
+    toast(t('scan.started'), 'success');
     $('scanIcon').classList.add('spin');
     pollScan();
   } catch (err) {
@@ -403,24 +840,29 @@ $('scanBtn').addEventListener('click', async () => {
   }
 });
 async function pollScan() {
-  for (let i = 0; i < 30; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    const s = await api('/api/stats').catch(() => null);
-    if (s && !s.scanning) {
-      $('scanIcon').classList.remove('spin');
-      toast('扫描完成', 'success');
-      loadTracks(true);
-      loadDirs();
-      loadPlaylists();
-      return;
+  scanPolling = true;
+  try {
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const s = await api('/api/stats').catch(() => null);
+      if (s && !s.scanning) {
+        toast(t('scan.done'), 'success');
+        loadTracks(true).catch((err) => toast(err.message, 'error'));
+        loadDirs().catch(() => {});
+        loadPlaylists().catch(() => {});
+        return;
+      }
     }
+    toast(t('scan.timeout'), 'error');
+  } finally {
+    scanPolling = false;
+    $('scanIcon').classList.remove('spin');
   }
-  $('scanIcon').classList.remove('spin');
 }
 
 // 退出登录
 $('logoutBtn').addEventListener('click', async () => {
-  if (!confirm('确定退出登录？')) return;
+  if (!confirm(t('logout.confirm'))) return;
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   location.href = '/login';
 });
@@ -447,13 +889,13 @@ async function loadPlaylists() {
       <div class="pl-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7-4.6-9.5-9A5.5 5.5 0 0 1 12 6.2 5.5 5.5 0 0 1 21.5 12C19 16.4 12 21 12 21z"/></svg></div>
       <div style="flex:1;min-width:0">
         <div class="pl-name">${esc(p.name)}</div>
-        <div class="pl-count">${p.track_count} 首</div>
+        <div class="pl-count">${t('pl.trackCount', { count: p.track_count })}</div>
       </div>
-      <button class="row-remove" data-pl-del="${p.id}" title="删除列表">
+      <button class="row-remove" data-pl-del="${p.id}" title="${t('pl.deleteList')}">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
       </button>
     </div>`).join('')
-    : '<p class="text-secondary" style="font-size:13px;padding:8px 4px">还没有播放列表</p>';
+    : `<p class="text-secondary" style="font-size:13px;padding:8px 4px">${t('pl.empty')}</p>`;
 
   if (state.currentPlaylistId) renderPlaylistDetail(state.currentPlaylistId);
 }
@@ -463,14 +905,14 @@ $('playlistList').addEventListener('click', async (e) => {
   if (del) {
     e.stopPropagation();
     const id = Number(del.dataset.plDel);
-    if (!confirm('删除该播放列表？（曲目本身不会被删除）')) return;
+    if (!confirm(t('pl.deleteConfirm'))) return;
     await api('/api/playlists/' + id, { method: 'DELETE' });
     if (state.currentPlaylistId === id) {
       state.currentPlaylistId = null;
       $('playlistDetail').innerHTML = '';
       $('plDetailTitle').style.display = 'none';
     }
-    toast('列表已删除', 'success');
+    toast(t('pl.deleted'), 'success');
     return loadPlaylists();
   }
   const row = e.target.closest('[data-pl]');
@@ -483,23 +925,23 @@ $('playlistList').addEventListener('click', async (e) => {
 async function renderPlaylistDetail(id) {
   const tracks = await api(`/api/playlists/${id}/tracks`);
   $('plDetailTitle').style.display = 'block';
-  $('plDetailTitle').textContent = `列表曲目 · ${tracks.length} 首`;
+  $('plDetailTitle').textContent = t('pl.detailTitle', { count: tracks.length });
   $('playlistDetail').innerHTML = `
     <div class="pl-actions">
       <button class="btn-primary" id="playAllBtn" ${tracks.length ? '' : 'disabled'}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>播放全部
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>${t('pl.playAll')}
       </button>
     </div>` +
-    tracks.map((t, i) => `
-    <div class="track-row" data-play-track="${t.id}">
+    tracks.map((tr, i) => `
+    <div class="track-row" data-play-track="${tr.id}">
       <span class="row-index">${i + 1}</span>
-      <img class="row-cover" src="${coverUrl(t)}" alt="封面" onerror="this.src='${COVER_PLACEHOLDER}'">
+      <img class="row-cover cover-fallback" src="${coverUrl(tr)}" alt="${t('common.cover')}">
       <div class="row-meta">
-        <div class="row-title">${esc(t.title)}</div>
-        <div class="row-artist">${esc(t.artist || '未知艺术家')}</div>
+        <div class="row-title">${esc(tr.title)}</div>
+        <div class="row-artist">${esc(tr.artist || t('library.unknownArtist'))}</div>
       </div>
-      <span class="row-dur">${fmtDuration(t.duration)}</span>
-      <button class="row-remove" data-remove-track="${t.id}" title="从列表移除">
+      <span class="row-dur">${fmtDuration(tr.duration)}</span>
+      <button class="row-remove" data-remove-track="${tr.id}" title="${t('pl.removeFromList')}">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>`).join('');
@@ -514,7 +956,7 @@ async function renderPlaylistDetail(id) {
       if (e.target.closest('[data-remove-track]')) return;
       const id = Number(row.dataset.playTrack);
       state.queue = tracks.slice();
-      playIndex(tracks.findIndex((t) => t.id === id));
+      playIndex(tracks.findIndex((tr) => tr.id === id));
       closeDrawer();
     });
   });
@@ -540,7 +982,7 @@ async function quickAddToPlaylist(trackId) {
     return toast(err.message, 'error');
   }
   if (pls.length === 0) {
-    toast('请先新建一个播放列表');
+    toast(t('pl.needCreateFirst'));
     return openModal(); // 新建成功后会自动把该歌曲加入
   }
   openPicker(pls);
@@ -553,7 +995,7 @@ function openPicker(pls) {
       <div class="pl-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7-4.6-9.5-9A5.5 5.5 0 0 1 12 6.2 5.5 5.5 0 0 1 21.5 12C19 16.4 12 21 12 21z"/></svg></div>
       <div style="flex:1;min-width:0">
         <div class="pl-name">${esc(p.name)}</div>
-        <div class="pl-count">${p.track_count} 首</div>
+        <div class="pl-count">${t('pl.trackCount', { count: p.track_count })}</div>
       </div>
     </div>`).join('');
   $('pickerMask').classList.add('open');
@@ -573,7 +1015,7 @@ $('pickerList').addEventListener('click', async (e) => {
   try {
     await api(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: 'POST' });
     const name = item.querySelector('.pl-name')?.textContent || '';
-    toast(`已加入「${name}」`, 'success');
+    toast(t('pl.addedTo', { name: name }), 'success');
     closePicker();
     loadPlaylists();
   } catch (err) {
@@ -588,11 +1030,9 @@ $('pickerNewBtn').addEventListener('click', () => {
   openModal();
 });
 
-// ---------------- 模态框（新建/重命名） ----------------
-let modalMode = 'create'; // create
+// ---------------- 模态框（新建播放列表） ----------------
 function openModal() {
-  modalMode = 'create';
-  $('modalTitle').textContent = state.pendingTrackId ? '新建播放列表并加入' : '新建播放列表';
+  $('modalTitle').textContent = state.pendingTrackId ? t('modal.newPlaylistAndAdd') : t('modal.newPlaylist');
   $('modalInput').value = '';
   $('modalMask').classList.add('open');
   $('modalInput').focus();
@@ -605,7 +1045,7 @@ $('modalMask').addEventListener('click', (e) => {
 });
 $('modalConfirm').addEventListener('click', async () => {
   const name = $('modalInput').value.trim();
-  if (!name) return toast('名称不能为空', 'error');
+  if (!name) return toast(t('pl.nameEmpty'), 'error');
   try {
     const pl = await api('/api/playlists', { method: 'POST', body: JSON.stringify({ name }) });
     state.currentPlaylistId = pl.id;
@@ -616,12 +1056,12 @@ $('modalConfirm').addEventListener('click', async () => {
       state.pendingTrackId = null;
       try {
         await api(`/api/playlists/${pl.id}/tracks/${trackId}`, { method: 'POST' });
-        toast(`已创建并加入「${name}」`, 'success');
+        toast(t('pl.createdAndAdded', { name: name }), 'success');
       } catch (err) {
-        toast('列表已创建，但加入失败: ' + err.message, 'error');
+        toast(t('pl.createdButAddFailed', { msg: err.message }), 'error');
       }
     } else {
-      toast('列表已创建', 'success');
+      toast(t('pl.created'), 'success');
     }
     loadPlaylists();
   } catch (err) {
@@ -630,11 +1070,53 @@ $('modalConfirm').addEventListener('click', async () => {
 });
 $('modalInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('modalConfirm').click(); });
 
+// ---------------- 多语言切换 ----------------
+$('langBtn').addEventListener('click', () => I18N.toggleLang());
+
+// 语言切换后，重建所有由 JS 动态生成的文案与 DOM
+document.addEventListener('langchange', () => {
+  // 主题/模式按钮 title（applyDOM 不覆盖这些运行时改写的属性）
+  setTheme(state.theme);
+  setMode(state.mode, true);
+  // 定时下拉选项（保留当前倒计时显示）
+  resetSleepOptionText();
+  if (sleepUntil) renderSleep();
+  // 动态列表与详情
+  renderTracks();
+  refreshStats();
+  // 目录树用缓存数据按新语言重建（根目录名等文案随语言刷新），避免重复请求
+  if (rawDirs.length) { dirTreeData = buildDirTree(rawDirs); renderDirTree(); }
+  renderResumeBadge();
+  loadPlaylists().catch(() => {});
+  // 模态框标题（若打开中）
+  if ($('modalMask').classList.contains('open')) openModal();
+});
+
+// 刷新后恢复上次播放的曲目与位置（不自动播放，由浏览器策略限制，用户点播放即从记忆位置继续）
+async function restoreLastSession() {
+  const lastId = Number(localStorage.getItem(POS_LAST_KEY));
+  if (!lastId) return;
+  try {
+    const tr = await api('/api/tracks/' + lastId);
+    state.queue = [tr];
+    state.queuePos = 0;
+    loadTrack(tr, true);
+    renderResumeBadge();
+    updateActiveCard(tr.id);
+  } catch (_) {
+    /* 曲目可能已被删除，静默忽略 */
+  }
+}
+
 // ---------------- 初始化 ----------------
 setTheme(state.theme);
 setView(state.view);
-setMode(state.mode);
-loadDirs().catch(() => {});
-loadTracks(true).catch((err) => toast(err.message, 'error'));
+setMode(state.mode, true);
+setSpeed(state.speed, true);
+resetSleepOptionText();
+loadDirs().catch((err) => toast(err.message, 'error'));
+loadTracks(true)
+  .then(restoreLastSession)
+  .catch((err) => toast(err.message, 'error'));
 refreshStats();
 setInterval(refreshStats, 30000);

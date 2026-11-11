@@ -5,8 +5,11 @@
 ## 特性
 
 - **目录扫描入库**：递归扫描本地音频目录，自动解析标题/艺术家/专辑与内嵌封面；支持启动扫描、定时扫描、页面手动扫描，按路径+修改时间增量更新
+- **目录树导航**：左右分栏布局，左侧依据音频相对目录生成可展开/折叠的层级树（自动补齐中间层级），蓝色高亮当前选中目录并显示各目录（含子目录）曲目数；选中目录与展开状态跨刷新记忆，首次进入默认全部展开；窄屏（≤900px）下侧边栏自动变为抽屉式
 - **在线流播放**：支持 HTTP Range 请求，可拖动进度条、断点续播；手机锁屏/蓝牙线控（Media Session API）
-- **浏览与搜索**：封面网格 / 列表两种视图，按标题/艺术家/专辑关键词即时搜索，多种排序与分页
+- **播放位置记忆**：按曲目分别记忆播放进度（浏览器 localStorage），刷新页面后自动恢复上次曲目与位置并提供「一键续播」；播放中节流落盘，暂停/关闭页面前再保存，完整播完或删除曲目时自动清除
+- **浏览与搜索**：封面网格 / 列表两种视图，按标题/艺术家/专辑关键词即时搜索；支持文件名/标题/艺术家/专辑/最新多种排序（默认按文件名）与分页
+- **中英文双语**：内置零依赖 i18n 引擎，登录页与主应用一键切换简体中文 / English，语言偏好本地持久化，切换即时生效
 - **播放列表**：创建/重命名/删除播放列表，曲目加入/移除，连续播放、列表循环、随机播放三种模式
 - **管理**：删除库记录，可选同时删除磁盘文件；自动清理已失效的曲目记录
 - **安全**：单用户密码登录（bcrypt 哈希）、会话 Cookie、按 IP 登录限速（连续失败 5 次锁定 10 分钟）、安全响应头
@@ -20,7 +23,7 @@
 | 数据库 | SQLite（`modernc.org/sqlite` 纯 Go 驱动，WAL 模式，无 CGO） |
 | 标签解析 | `dhowden/tag`（ID3v1/v2、FLAC、OGG 等，提取内嵌封面） |
 | 密码 | `golang.org/x/crypto/bcrypt` |
-| 前端 | 原生 HTML/CSS/JS，`embed.FS` 内嵌，无构建步骤、无 CDN 依赖 |
+| 前端 | 原生 HTML/CSS/JS，自研零依赖 i18n（`i18n.js` + `locales/` 字典），`embed.FS` 内嵌，无构建步骤、无 CDN 依赖 |
 | 配置 | YAML（`gopkg.in/yaml.v3`） |
 
 ## 目录结构
@@ -38,6 +41,8 @@ MyAduio/
 ├── web/                       # 前端静态资源（embed 进二进制）
 │   ├── embed.go
 │   ├── index.html  login.html  app.js  style.css
+│   ├── i18n.js                # 轻量 i18n 引擎（t()/setLang/langchange 事件）
+│   └── locales/               # 词条字典：zh-CN.js、en.js
 ├── deploy/myaudio.service     # systemd 单元
 ├── config.example.yaml        # 配置示例
 └── go.mod / go.sum
@@ -271,9 +276,11 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| GET | `/api/auth/status` | 当前登录状态 |
 | POST | `/api/auth/login` | 密码登录，下发会话 Cookie |
 | POST | `/api/auth/logout` | 退出登录 |
-| GET | `/api/tracks` | 曲目分页/搜索（`keyword`、`order`、`page`、`per_page`） |
+| GET | `/api/tracks` | 曲目分页/搜索（`keyword`、`order`、`dir`、`page`、`per_page`） |
+| GET | `/api/dirs` | 目录导航：聚合各相对目录及曲目数（含子目录，根目录用空串） |
 | GET | `/api/tracks/:id` | 曲目详情 |
 | DELETE | `/api/tracks/:id?delete_file=true` | 删除曲目（可选删文件） |
 | GET | `/api/stream/:id` | 流式播放（支持 Range / 206） |
@@ -285,12 +292,40 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 | GET | `/api/playlists/:id/tracks` | 列表内曲目 |
 | POST/DELETE | `/api/playlists/:id/tracks/:trackID` | 加入 / 移除曲目 |
 
+> `GET /api/tracks` 的 `order` 取值：`created_at`（最新）、`filename`（文件名，前端默认）、`title`、`artist`、`album`；`dir` 为相对目录，空串表示根目录（全部），传具体目录时按该目录及其子目录过滤。后端错误统一以 `{code, error, msg}` 结构返回，前端依据 `code` 做中英文本地化映射。
+
+## 前端界面与本地状态
+
+前端为零构建、零框架的原生实现，所有用户偏好均保存在浏览器 `localStorage`（键名统一以 `myaudio_` 开头），清除站点数据即可恢复默认：
+
+| 键 | 内容 |
+|---|---|
+| `myaudio_lang` | 界面语言：`zh-CN` / `en` |
+| `myaudio_theme` | 主题：`light` / `dark` |
+| `myaudio_view` | 视图：`grid`（网格）/ `list`（列表） |
+| `myaudio_order` | 排序字段，默认 `filename` |
+| `myaudio_dir` | 当前选中的相对目录（空串 = 根目录/全部） |
+| `myaudio_dir_expanded` | 目录树中展开的目录路径数组 |
+| `myaudio_mode` / `myaudio_speed` | 播放模式 / 播放倍速 |
+| `myaudio_positions` | 各曲目播放进度（按曲目 ID 存秒，最多保留 200 条自动淘汰） |
+| `myaudio_last_track` | 上次播放的曲目 ID，用于刷新后恢复会话 |
+
+**目录树**：后端 `/api/dirs` 返回的是“含曲目的扁平相对目录”，前端 `buildDirTree()` 按 `/` 拆分补齐中间层级组装成树；父目录曲目数取该目录及所有子目录之和；选中项以蓝色高亮（独立于品牌紫），桌面端左侧常驻吸顶，窄屏（≤900px）折叠为带遮罩的抽屉。
+
+**播放位置记忆**：播放中每 3 秒节流保存一次进度，并在暂停、页面隐藏（`visibilitychange`）、关闭/刷新（`pagehide`）时补存；刷新后自动加载上次曲目并定位到记忆位置（受浏览器自动播放策略限制不会主动出声），点击播放器上的续播徽标即从该位置继续。距开头不足 5 秒或临近结尾按从头播放处理。
+
+**国际化（i18n）**：`web/i18n.js` 提供全局 `t(key, params)` 与 `I18N.setLang/toggleLang`，静态文本通过 `data-i18n`（及 `data-i18n-placeholder/title/aria-label/alt`）绑定，动态文案在代码中调用 `t()`；切换语言时派发 `langchange` 事件，业务代码据此重建动态 DOM。新增词条只需同步编辑 `web/locales/zh-CN.js` 与 `web/locales/en.js`。
+
+> 由于前端资源通过 `embed` 编译进二进制，**修改 `web/` 后必须重新 `./run.sh build && ./run.sh restart`（或重新 `go build` 并重启）才会生效**；浏览器侧再做一次强制刷新（`Ctrl/Cmd + Shift + R`）以跳过缓存。
+
 ## 设计说明
 
-- **数据模型**：`tracks`、`playlists`、`playlist_tracks` 三表，外键级联删除，播放列表用 `position` 维护顺序
+- **数据模型**：`tracks`、`playlists`、`playlist_tracks` 三表，外键级联删除，播放列表用 `position` 维护顺序；`tracks` 含 `dir`/`filename` 列并建有索引，支撑目录导航与文件名排序
 - **增量扫描**：以文件绝对路径唯一约束 + 修改时间判断变更，未变更文件跳过标签解析；扫描并发度限制为 `min(CPU, 4)`，控制 fd 与内存
 - **封面存储**：内嵌封面以音频路径的 SHA1 命名落盘到 `data/covers`，通过 `/api/cover/:id` 提供并设置浏览器缓存
 - **WAV 时长**：直接解析 RIFF 文件头得到精确时长；其他格式按平均码率估算
+- **目录聚合**：`ListDirs` 按 `dir` 分组统计，每个目录的曲目数用 `dir = ? OR dir LIKE ?`（参数为 `目录` 与 `目录/%`）做前缀匹配，天然包含其所有子目录
+- **错误本地化**：后端返回稳定的错误码 `code` 而非硬编码文案，前端按 `code` 映射到当前语言，兼容旧版中文串
 - **优雅退出**：捕获 `SIGINT/SIGTERM`，停止接收新连接并在 8 秒内完成在途请求
 
 ## 后续可扩展点

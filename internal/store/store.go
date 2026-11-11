@@ -4,6 +4,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -264,7 +265,8 @@ func (s *Store) ListDirs() ([]model.DirInfo, error) {
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tracks`).Scan(&total); err != nil {
 		return nil, err
 	}
-	out = append(out, model.DirInfo{Dir: "", Name: "根目录", Count: total})
+	// 根目录 Name 留空，由前端按当前语言本地化展示（i18n key: common.rootDir）
+	out = append(out, model.DirInfo{Dir: "", Name: "", Count: total})
 
 	// 每个目录的 Count 取“该目录及其子目录”的曲目数，点击父目录可看到下级内容
 	for _, dir := range dirs {
@@ -483,6 +485,21 @@ func (s *Store) PlaylistTracks(playlistID int64) ([]model.Track, error) {
 
 // AddTrackToPlaylist 追加曲目到列表末尾；已存在则忽略
 func (s *Store) AddTrackToPlaylist(playlistID, trackID int64) error {
+	// 前置存在性校验：把外键约束失败转成语义化的 ErrNotFound，避免底层错误冒泡成 500。
+	var ok int
+	if err := s.db.QueryRow(`SELECT 1 FROM playlists WHERE id=?`, playlistID).Scan(&ok); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if err := s.db.QueryRow(`SELECT 1 FROM tracks WHERE id=?`, trackID).Scan(&ok); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
 	var maxPos sql.NullInt64
 	if err := s.db.QueryRow(`SELECT MAX(position) FROM playlist_tracks WHERE playlist_id=?`,
 		playlistID).Scan(&maxPos); err != nil {

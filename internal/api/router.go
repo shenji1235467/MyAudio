@@ -68,9 +68,12 @@ func (h *Handler) Register(r *gin.Engine) {
 
 // publicAssets 无需认证即可访问的静态资源
 var publicAssets = map[string]bool{
-	"style.css": true,
-	"app.js":    true,
-	"favicon.ico": true,
+	"style.css":           true,
+	"app.js":              true,
+	"i18n.js":             true,
+	"favicon.ico":         true,
+	"locales/zh-CN.js":    true,
+	"locales/en.js":       true,
 }
 
 // serveFrontend 区分静态资源与 SPA 页面：资源放行，页面需登录
@@ -115,7 +118,7 @@ func (h *Handler) serveFrontend(c *gin.Context) {
 func (h *Handler) serveIndex(c *gin.Context) {
 	data, err := fs.ReadFile(h.webFS, "index.html")
 	if err != nil {
-		c.String(http.StatusInternalServerError, "前端资源缺失")
+		c.String(http.StatusInternalServerError, "frontend asset missing")
 		return
 	}
 	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
@@ -137,7 +140,7 @@ func (h *Handler) serveLoginPage(c *gin.Context) {
 	}
 	data, err := fs.ReadFile(h.webFS, "login.html")
 	if err != nil {
-		c.String(http.StatusInternalServerError, "登录页缺失")
+		c.String(http.StatusInternalServerError, "login page missing")
 		return
 	}
 	c.Data(http.StatusOK, "text/html; charset=utf-8", data)
@@ -152,16 +155,16 @@ type loginRequest struct {
 func (h *Handler) login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误"})
+		apiErr(c, http.StatusBadRequest, codeBadRequest, "")
 		return
 	}
 	token, err := h.auth.Login(c.ClientIP(), req.Password)
 	if err != nil {
-		status := http.StatusUnauthorized
 		if err == auth.ErrTooManyAttempts {
-			status = http.StatusTooManyRequests
+			apiErr(c, http.StatusTooManyRequests, codeTooManyAttempts, "")
+			return
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		apiErr(c, http.StatusUnauthorized, codeInvalidPassword, "")
 		return
 	}
 	auth.SetCookie(c, token, h.cfg.SessionTTL)

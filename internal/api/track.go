@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -30,7 +31,7 @@ func (h *Handler) listTracks(c *gin.Context) {
 
 	result, err := h.store.ListTracks(q)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败: " + err.Error()})
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -43,12 +44,12 @@ func (h *Handler) getTrack(c *gin.Context) {
 		return
 	}
 	t, err := h.store.GetTrack(id)
-	if errors.Is(err, os.ErrNotExist) || t == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "曲目不存在"})
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && t == nil) {
+		apiErr(c, http.StatusNotFound, codeTrackNotFound, "")
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, t)
@@ -62,13 +63,17 @@ func (h *Handler) deleteTrack(c *gin.Context) {
 	}
 	// 删除前取出曲目，便于清理封面缓存
 	t, err := h.store.GetTrack(id)
-	if err != nil || t == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "曲目不存在"})
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && t == nil) {
+		apiErr(c, http.StatusNotFound, codeTrackNotFound, "")
+		return
+	}
+	if err != nil {
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 	deleteFile := c.Query("delete_file") == "true" || c.Query("delete_file") == "1"
 	if err := h.store.DeleteTrack(id, deleteFile); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 	if coverPath, ok := scanner.CoverPath(h.cfg.CoverDir(), t.Path); ok {
@@ -84,29 +89,32 @@ func (h *Handler) stream(c *gin.Context) {
 		return
 	}
 	t, err := h.store.GetTrack(id)
-	if err != nil || t == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "曲目不存在"})
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && t == nil) {
+		apiErr(c, http.StatusNotFound, codeTrackNotFound, "")
+		return
+	}
+	if err != nil {
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 	f, err := os.Open(t.Path)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "音频文件不存在或已被移动"})
+		// 记录存在但磁盘文件缺失：对客户端而言资源确不可用，返回 404 合理
+		apiErr(c, http.StatusNotFound, codeFileMissing, "")
 		return
 	}
 	defer f.Close()
 	stat, err := f.Stat()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 
 	c.Header("Accept-Ranges", "bytes")
 	c.Header("Cache-Control", "private, max-age=3600")
-	if t.Title != "" {
-		// 文件名 ASCII 兜底，避免非 ASCII 在 Content-Disposition 中出错
-		c.Header("Content-Disposition", `inline; filename="track-`+strconv.FormatInt(id, 10)+`."`+t.Format)
-	}
-	// http.ServeContent 自动处理 Range、If-Modified-Since 与 206/304
+	// ASCII 兜底文件名，避免非 ASCII 在 Content-Disposition 中出错（与标题无关，恒设置）
+	c.Header("Content-Disposition", `inline; filename="track-`+strconv.FormatInt(id, 10)+`.`+t.Format+`"`)
+	// http.ServeContent 自动处理 Range、If-Modified-Since 与 206/304，Content-Range 单位由标准库写为 bytes
 	c.Header("Content-Type", mimeByFormat(t.Format))
 	http.ServeContent(c.Writer, c.Request, stat.Name(), stat.ModTime(), f)
 }
@@ -118,8 +126,12 @@ func (h *Handler) cover(c *gin.Context) {
 		return
 	}
 	t, err := h.store.GetTrack(id)
-	if err != nil || t == nil {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && t == nil) {
 		c.Status(http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 	path, ok := scanner.CoverPath(h.cfg.CoverDir(), t.Path)
@@ -135,7 +147,7 @@ func (h *Handler) cover(c *gin.Context) {
 func (h *Handler) stats(c *gin.Context) {
 	count, duration, err := h.store.Stats()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		apiErr(c, http.StatusInternalServerError, codeQueryFailed, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -148,7 +160,7 @@ func (h *Handler) stats(c *gin.Context) {
 // triggerScan POST /api/scan —— 手动触发扫描（防重入）
 func (h *Handler) triggerScan(c *gin.Context) {
 	if h.scanner.IsRunning() {
-		c.JSON(http.StatusConflict, gin.H{"error": "扫描任务正在进行中"})
+		apiErr(c, http.StatusConflict, codeScanInProgress, "")
 		return
 	}
 	// 必须使用独立 context：c.Request.Context() 会在 HTTP 响应返回后被取消，
@@ -160,7 +172,7 @@ func (h *Handler) triggerScan(c *gin.Context) {
 			_ = err // 错误已在扫描器内记录日志
 		}
 	}()
-	c.JSON(http.StatusAccepted, gin.H{"ok": true, "message": "扫描已启动"})
+	c.JSON(http.StatusAccepted, gin.H{"ok": true, "message": "scan started"})
 }
 
 // ---------------- 辅助 ----------------
@@ -168,7 +180,7 @@ func (h *Handler) triggerScan(c *gin.Context) {
 func parseID(c *gin.Context) (int64, error) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		apiErr(c, http.StatusBadRequest, codeInvalidID, "")
 		return 0, errors.New("invalid id")
 	}
 	return id, nil

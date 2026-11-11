@@ -58,8 +58,9 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("解析配置文件 %s 失败: %w", path, err)
 		}
 	case errors.Is(err, os.ErrNotExist):
-		// 生成随机初始密码
+		// 生成随机初始密码，并为首次运行赋予定时扫描默认值（0 才表示关闭）
 		cfg.Password = randomPassword(10)
+		cfg.ScanInterval = 5 * time.Minute
 		if err := cfg.Save(path); err != nil {
 			return nil, err
 		}
@@ -98,8 +99,10 @@ func (c *Config) normalizeAndCheck(baseDir string) error {
 	if c.DataDir == "" {
 		c.DataDir = filepath.Join(baseDir, "data")
 	}
-	if c.ScanInterval <= 0 {
-		c.ScanInterval = 5 * time.Minute
+	// 扫描间隔：0 表示关闭定时扫描（仍可手动触发）；负值归一化为 0。
+	// 需要定时扫描请在配置中显式填写，如 scan_interval: 5m。
+	if c.ScanInterval < 0 {
+		c.ScanInterval = 0
 	}
 	if c.SessionTTL <= 0 {
 		c.SessionTTL = 7 * 24 * time.Hour

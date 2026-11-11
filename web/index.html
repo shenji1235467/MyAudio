@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#F4F6FB" id="metaThemeColor">
-<title>MyAudio · 私人音频库</title>
+<title data-i18n="app.title">MyAudio · 私人音频库</title>
 <script>
   // 首屏渲染前确定主题，避免明暗闪烁；默认明亮，仅当用户明确选择暗色时才用暗色
   (function () {
@@ -22,28 +22,34 @@
 <!-- 顶部导航 -->
 <header class="glass topbar">
   <div class="container topbar-inner">
+    <button id="sidebarToggle" class="icon-btn sidebar-toggle" data-i18n-title="nav.folders" title="目录">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    </button>
     <a href="/" class="logo">MyAudio</a>
     <div class="search-wrap" style="margin-left:8px">
       <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-      <input id="searchInput" class="search-input" type="search" placeholder="搜索标题 / 艺术家 / 专辑…" autocomplete="off">
+      <input id="searchInput" class="search-input" type="search" data-i18n-placeholder="nav.searchPlaceholder" placeholder="搜索标题 / 艺术家 / 专辑…" autocomplete="off">
     </div>
     <div class="spacer"></div>
-    <button id="gridViewBtn" class="icon-btn active" title="网格视图">
+    <button id="langBtn" class="icon-btn" data-i18n-title="nav.switchLang" title="Switch to English">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+    </button>
+    <button id="gridViewBtn" class="icon-btn active" data-i18n-title="nav.gridView" title="网格视图">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>
     </button>
-    <button id="listViewBtn" class="icon-btn" title="列表视图">
+    <button id="listViewBtn" class="icon-btn" data-i18n-title="nav.listView" title="列表视图">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
-    <button id="themeBtn" class="icon-btn" title="切换明亮 / 暗色主题">
+    <button id="themeBtn" class="icon-btn" data-i18n-title="nav.toggleTheme" title="切换明亮 / 暗色主题">
       <svg id="themeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></svg>
     </button>
-    <button id="scanBtn" class="icon-btn" title="重新扫描音频目录">
+    <button id="scanBtn" class="icon-btn" data-i18n-title="nav.rescan" title="重新扫描音频目录">
       <svg id="scanIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/></svg>
     </button>
-    <button id="drawerBtn" class="icon-btn" title="播放列表">
+    <button id="drawerBtn" class="icon-btn" data-i18n-title="nav.playlists" title="播放列表">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h12M4 12h12M4 18h7"/><circle cx="18" cy="16" r="3"/><path d="M21 16V9l-3 1"/></svg>
     </button>
-    <button id="logoutBtn" class="avatar" title="退出登录">M</button>
+    <button id="logoutBtn" class="avatar" data-i18n-title="nav.logout" title="退出登录">M</button>
   </div>
 </header>
 
@@ -51,18 +57,22 @@
   <!-- 播放器（置于音频库上方，静态卡片） -->
   <div class="player-bar">
     <div class="glass player-inner">
-      <img id="npCover" class="np-cover" alt="封面">
+      <img id="npCover" class="np-cover cover-fallback" data-i18n-alt="common.cover" alt="封面">
       <div class="np-meta">
-        <div id="npTitle" class="np-title">未在播放</div>
-        <div id="npArtist" class="np-artist">选择一首曲目开始</div>
+        <div id="npTitle" class="np-title" data-i18n="player.notPlaying">未在播放</div>
+        <div id="npArtist" class="np-artist" data-i18n="player.selectTrack">选择一首曲目开始</div>
+        <button id="resumeBadge" class="resume-badge" style="display:none">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
+          <span id="resumeBadgeText"></span>
+        </button>
       </div>
-      <button id="prevBtn" class="icon-btn" title="上一首">
+      <button id="prevBtn" class="icon-btn" data-i18n-title="player.prev" title="上一首">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6h2v12H7zM20 6v12l-10-6z"/></svg>
       </button>
-      <button id="playBtn" class="play-btn-main" title="播放/暂停">
+      <button id="playBtn" class="play-btn-main" data-i18n-title="player.playPause" title="播放/暂停">
         <svg id="playIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
       </button>
-      <button id="nextBtn" class="icon-btn" title="下一首">
+      <button id="nextBtn" class="icon-btn" data-i18n-title="player.next" title="下一首">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15 6h2v12h-2zM4 6v12l10-6z"/></svg>
       </button>
       <div class="progress-desktop">
@@ -73,40 +83,73 @@
         </div>
         <span id="durTime" class="time">0:00</span>
       </div>
-      <button id="modeBtn" class="icon-btn" title="播放模式">
+      <button id="modeBtn" class="icon-btn" data-i18n-title="player.mode" title="播放模式">
         <svg id="modeIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
       </button>
+      <select id="speedSelect" class="speed-select" data-i18n-title="player.speed" data-i18n-aria-label="player.speed" title="播放速度" aria-label="播放速度">
+        <option value="1">1x</option>
+        <option value="1.25">1.25x</option>
+        <option value="1.5">1.5x</option>
+        <option value="2">2x</option>
+        <option value="2.5">2.5x</option>
+        <option value="3">3x</option>
+      </select>
+      <select id="sleepSelect" class="speed-select sleep-select" data-i18n-title="player.sleep" data-i18n-aria-label="player.sleep" title="定时停止播放" aria-label="定时停止播放">
+        <option value="0" data-i18n="player.sleepTimer">定时</option>
+        <option value="5" data-i18n="player.minutes" data-i18n-params='{"n":"5"}'>5 分钟</option>
+        <option value="15" data-i18n="player.minutes" data-i18n-params='{"n":"15"}'>15 分钟</option>
+        <option value="30" data-i18n="player.minutes" data-i18n-params='{"n":"30"}'>30 分钟</option>
+        <option value="45" data-i18n="player.minutes" data-i18n-params='{"n":"45"}'>45 分钟</option>
+        <option value="60" data-i18n="player.minutes" data-i18n-params='{"n":"60"}'>60 分钟</option>
+        <option value="90" data-i18n="player.minutes" data-i18n-params='{"n":"90"}'>90 分钟</option>
+      </select>
     </div>
     <div id="mobileProgress" class="progress-track mobile-progress"><div id="mobileFill" class="progress-fill"></div></div>
   </div>
 
-  <div class="page-head">
-    <div>
-      <h1>音频库</h1>
-      <p id="statsText">加载中…</p>
+  <div class="library-layout">
+    <!-- 移动端侧边栏遮罩 -->
+    <div id="sidebarMask" class="sidebar-mask"></div>
+
+    <!-- 左侧：目录树侧边栏（手机端为抽屉） -->
+    <aside id="sidebar" class="glass sidebar">
+      <div class="sidebar-header">
+        <h2 data-i18n="nav.folders">目录</h2>
+        <button id="sidebarClose" class="icon-btn sidebar-close" data-i18n-title="common.close" title="关闭">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <nav id="dirTree" class="dir-tree" aria-label="folders"></nav>
+    </aside>
+
+    <!-- 右侧：主内容区 -->
+    <div class="library-main">
+      <div class="page-head">
+        <div>
+          <h1 data-i18n="library.title">音频库</h1>
+          <p id="statsText" data-i18n="common.loading">加载中…</p>
+        </div>
+        <div class="chips" id="orderChips">
+          <span class="chip" data-order="created_at" data-i18n="library.orderLatest">最新</span>
+          <span class="chip active" data-order="filename" data-i18n="library.orderFilename">文件名</span>
+          <span class="chip" data-order="title" data-i18n="library.orderTitle">标题</span>
+          <span class="chip" data-order="artist" data-i18n="library.orderArtist">艺术家</span>
+          <span class="chip" data-order="album" data-i18n="library.orderAlbum">专辑</span>
+        </div>
+      </div>
+
+      <div id="trackGrid" class="track-grid"></div>
+
+      <div id="emptyState" class="empty" style="display:none">
+        <div class="big">🎧</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:6px" data-i18n="library.emptyTitle">暂无音频</div>
+        <div data-i18n="library.emptyHint">请将 MP3 / WAV / FLAC 等文件放入音频目录，然后点击右上角扫描按钮</div>
+      </div>
+
+      <div class="load-more-wrap">
+        <button id="loadMoreBtn" class="btn-primary" style="display:none" data-i18n="library.loadMore">加载更多</button>
+      </div>
     </div>
-    <div class="chips" id="orderChips">
-      <span class="chip active" data-order="created_at">最新</span>
-      <span class="chip" data-order="filename">文件名</span>
-      <span class="chip" data-order="title">标题</span>
-      <span class="chip" data-order="artist">艺术家</span>
-      <span class="chip" data-order="album">专辑</span>
-    </div>
-  </div>
-
-  <!-- 目录导航：按音频目录筛选 -->
-  <div id="dirBar" class="dir-bar"></div>
-
-  <div id="trackGrid" class="track-grid"></div>
-
-  <div id="emptyState" class="empty" style="display:none">
-    <div class="big">🎧</div>
-    <div style="font-size:16px;font-weight:600;margin-bottom:6px">暂无音频</div>
-    <div>请将 MP3 / WAV / FLAC 等文件放入音频目录，然后点击右上角扫描按钮</div>
-  </div>
-
-  <div class="load-more-wrap">
-    <button id="loadMoreBtn" class="btn-primary" style="display:none">加载更多</button>
   </div>
 </main>
 
@@ -114,7 +157,7 @@
 <div id="drawerMask" class="drawer-mask"></div>
 <aside id="drawer" class="glass drawer">
   <div class="drawer-header">
-    <h2>播放列表</h2>
+    <h2 data-i18n="pl.title">播放列表</h2>
     <button id="drawerClose" class="icon-btn">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
@@ -122,24 +165,24 @@
   <div class="drawer-body">
     <button id="newPlaylistBtn" class="new-playlist">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-      新建播放列表
+      <span data-i18n="pl.new">新建播放列表</span>
     </button>
-    <h3 class="section-title">我的列表</h3>
+    <h3 class="section-title" data-i18n="pl.mine">我的列表</h3>
     <div id="playlistList"></div>
     <h3 class="section-title" id="plDetailTitle" style="display:none">列表曲目</h3>
     <div id="playlistDetail"></div>
   </div>
 </aside>
 
-<!-- 新建/重命名模态框 -->
+<!-- 新建播放列表模态框 -->
 <div id="modalMask" class="modal-mask glass">
   <div class="glass modal">
-    <h3 id="modalTitle">新建播放列表</h3>
-    <label class="field-label" for="modalInput">列表名称</label>
-    <input id="modalInput" class="search-input" style="padding-left:14px" type="text" placeholder="例如：深夜驾驶" maxlength="40">
+    <h3 id="modalTitle" data-i18n="modal.newPlaylist">新建播放列表</h3>
+    <label class="field-label" for="modalInput" data-i18n="modal.nameLabel">列表名称</label>
+    <input id="modalInput" class="search-input" style="padding-left:14px" type="text" data-i18n-placeholder="modal.namePlaceholder" placeholder="例如：深夜驾驶" maxlength="40">
     <div class="modal-actions">
-      <button id="modalCancel" class="btn-ghost">取消</button>
-      <button id="modalConfirm" class="btn-primary">确定</button>
+      <button id="modalCancel" class="btn-ghost" data-i18n="common.cancel">取消</button>
+      <button id="modalConfirm" class="btn-primary" data-i18n="common.confirm">确定</button>
     </div>
   </div>
 </div>
@@ -147,20 +190,24 @@
 <!-- 选择播放列表模态框（把指定歌曲加入某个列表） -->
 <div id="pickerMask" class="modal-mask glass">
   <div class="glass modal">
-    <h3>加入播放列表</h3>
+    <h3 data-i18n="modal.addToPlaylist">加入播放列表</h3>
     <div id="pickerList" class="picker-list"></div>
     <button id="pickerNewBtn" class="new-playlist" style="margin-top:10px">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-      新建播放列表并加入
+      <span data-i18n="modal.newAndAdd">新建播放列表并加入</span>
     </button>
     <div class="modal-actions">
-      <button id="pickerCancel" class="btn-ghost">关闭</button>
+      <button id="pickerCancel" class="btn-ghost" data-i18n="common.close">关闭</button>
     </div>
   </div>
 </div>
 
 <audio id="audio" preload="metadata"></audio>
 <div id="toast" class="toast"></div>
+<script src="/i18n.js"></script>
+<script src="/locales/zh-CN.js"></script>
+<script src="/locales/en.js"></script>
+<script>I18N.applyDOM();</script>
 <script src="/app.js"></script>
 </body>
 </html>

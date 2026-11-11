@@ -21,6 +21,8 @@ const (
 	maxFailures = 5
 	// lockDuration 锁定时长
 	lockDuration = 10 * time.Minute
+	// failRecordTTL 失败记录在“无锁定且长期无活动”后的保留时长，用于 GC 回收，避免 map 无限增长
+	failRecordTTL = 30 * time.Minute
 )
 
 var (
@@ -35,19 +37,20 @@ type session struct {
 
 // failRecord 按 IP 记录失败与锁定状态
 type failRecord struct {
-	fails   int
+	fails     int
 	lockUntil time.Time
+	lastSeen  time.Time // 最近一次失败时间，供 GC 判断无活动记录
 }
 
 // Manager 认证管理器（内存实现，单实例部署足够；重启后需重新登录）
 type Manager struct {
-	hash       []byte
-	ttl        time.Duration
-	mu         sync.RWMutex
-	sessions   map[string]session
-	failMu     sync.Mutex
-	failures   map[string]*failRecord
-	quit       chan struct{}
+	hash     []byte
+	ttl      time.Duration
+	mu       sync.RWMutex
+	sessions map[string]session
+	failMu   sync.Mutex
+	failures map[string]*failRecord
+	quit     chan struct{}
 }
 
 // New 创建认证管理器。passwordHash 为空时用明文 password 生成 bcrypt 哈希。
@@ -131,7 +134,7 @@ func (m *Manager) Middleware() gin.HandlerFunc {
 		token, err := c.Cookie(CookieName)
 		if err != nil || !m.Valid(token) {
 			if isAPIRequest(c) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "未登录或会话已过期"})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "UNAUTHORIZED", "error": "UNAUTHORIZED"})
 				return
 			}
 			// 临时跳转并禁止缓存，防止浏览器记住重定向导致登录态异常时的跳转死循环
@@ -145,14 +148,29 @@ func (m *Manager) Middleware() gin.HandlerFunc {
 	}
 }
 
-// SetCookie 下发会话 Cookie
+// SetCookie 下发会话 Cookie。SameSite=Lax 兼顾跨站顶层导航与 CSRF 防护；
+// HttpOnly 防止 JS 读取，Secure 由部署在 HTTPS 反代后按需开启（当前反代负责 TLS）。
 func SetCookie(c *gin.Context, token string, ttl time.Duration) {
-	c.SetCookie(CookieName, token, int(ttl.Seconds()), "/", "", false, true)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     CookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(ttl.Seconds()),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // ClearCookie 清除会话 Cookie
 func ClearCookie(c *gin.Context) {
-	c.SetCookie(CookieName, "", -1, "/", "", false, true)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     CookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func (m *Manager) recordFailure(ip string) {
@@ -164,6 +182,7 @@ func (m *Manager) recordFailure(ip string) {
 		m.failures[ip] = rec
 	}
 	rec.fails++
+	rec.lastSeen = time.Now()
 	if rec.fails >= maxFailures {
 		rec.lockUntil = time.Now().Add(lockDuration)
 		rec.fails = 0
@@ -194,7 +213,11 @@ func (m *Manager) gcLoop() {
 			m.mu.Unlock()
 			m.failMu.Lock()
 			for ip, rec := range m.failures {
-				if now.After(rec.lockUntil) {
+				// 仍在锁定期内：保留；否则仅当长期无活动才回收，避免 map 随失败 IP 无限增长。
+				if now.Before(rec.lockUntil) {
+					continue
+				}
+				if now.Sub(rec.lastSeen) > failRecordTTL {
 					delete(m.failures, ip)
 				}
 			}
