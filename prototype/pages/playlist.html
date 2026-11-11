@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyAudio · 播放列表原型</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="ambient"></div>
+
+<!-- 原型导航（仅供设计确认，非产品功能） -->
+<nav class="proto-nav">
+  <div class="max-w-7xl mx-auto px-4 h-9 flex items-center justify-between">
+    <span class="text-secondary">静态原型 · 确认设计后开发完整功能</span>
+    <div class="flex items-center gap-2">
+      <a class="proto-link" href="library.html">① 音频库</a>
+      <a class="proto-link active" href="playlist.html">② 播放列表</a>
+      <a class="proto-link" href="login.html">③ 登录</a>
+    </div>
+  </div>
+</nav>
+
+<!-- 顶部导航栏 -->
+<header class="glass topbar sticky top-0 z-30">
+  <div class="max-w-7xl mx-auto px-4 md:px-6 h-16 flex items-center gap-3">
+    <a href="library.html" class="logo text-xl">MyAudio</a>
+    <div class="search-wrap flex-1 max-w-md ml-2 hidden md:block">
+      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input class="search-input w-full" type="text" placeholder="搜索标题 / 艺术家 / 专辑…">
+    </div>
+    <div class="flex-1"></div>
+    <a class="avatar" href="login.html" title="登录状态">M</a>
+  </div>
+</header>
+
+<!-- 主区：音频库背景（抽屉打开时被压暗） -->
+<main class="max-w-7xl mx-auto px-4 md:px-6 pt-6 pb-44">
+  <h1 class="text-2xl font-bold">音频库</h1>
+  <p class="text-secondary text-sm mt-1 mb-5">播放列表面板从右侧滑入，手机端全屏展示</p>
+  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4 md:gap-5" style="opacity:.45">
+    <div class="track-card">
+      <div class="cover-wrap">
+        <img class="cover-img" src="https://placehold.co/400x400/7C5CFF/FFFFFF?text=%E2%99%AA" alt="夜色电台封面" onerror="this.src='https://placehold.co/400x400/1C2333/9AA3B5?text=%E2%99%AA'">
+      </div>
+      <div class="p-3"><div class="card-title">夜色电台</div><div class="card-artist">星轨乐队</div></div>
+    </div>
+    <div class="track-card">
+      <div class="cover-wrap">
+        <img class="cover-img" src="https://placehold.co/400x400/00A8CC/FFFFFF?text=%E2%99%AA" alt="夏日余温封面" onerror="this.src='https://placehold.co/400x400/1C2333/9AA3B5?text=%E2%99%AA'">
+      </div>
+      <div class="p-3"><div class="card-title">夏日余温</div><div class="card-artist">陈默</div></div>
+    </div>
+    <div class="track-card">
+      <div class="cover-wrap">
+        <img class="cover-img" src="https://placehold.co/400x400/FF5C8A/FFFFFF?text=%E2%99%AA" alt="Rainy Loop封面" onerror="this.src='https://placehold.co/400x400/1C2333/9AA3B5?text=%E2%99%AA'">
+      </div>
+      <div class="p-3"><div class="card-title">Rainy Loop</div><div class="card-artist">Aqua Sound</div></div>
+    </div>
+    <div class="track-card">
+      <div class="cover-wrap">
+        <img class="cover-img" src="https://placehold.co/400x400/2D1B69/FFFFFF?text=%E2%99%AA" alt="城市微光封面" onerror="this.src='https://placehold.co/400x400/1C2333/9AA3B5?text=%E2%99%AA'">
+      </div>
+      <div class="p-3"><div class="card-title">城市微光</div><div class="card-artist">沐橙</div></div>
+    </div>
+    <div class="track-card">
+      <div class="cover-wrap">
+        <img class="cover-img" src="https://placehold.co/400x400/155E75/FFFFFF?text=%E2%99%AA" alt="Deep Focus封面" onerror="this.src='https://placehold.co/400x400/1C2333/9AA3B5?text=%E2%99%AA'">
+      </div>
+      <div class="p-3"><div class="card-title">Deep Focus</div><div class="card-artist">Lumen</div></div>
+    </div>
+    <div class="track-card">
+      <div class="cover-wrap">
+        <img class="cover-img" src="https://placehold.co/400x400/9D174D/FFFFFF?text=%E2%99%AA" alt="海风信笺封面" onerror="this.src='https://placehold.co/400x400/1C2333/9AA3B5?text=%E2%99%AA'">
+      </div>
+      <div class="p-3"><div class="card-title">海风信笺</div><div class="card-artist">白屿</div></div>
+    </div>
+  </div>
+</main>
+
+<!-- 播放列表抽屉（右侧滑入，手机端全屏） -->
+<aside class="drawer glass">
+  <div class="drawer-header">
+    <h2 class="text-lg font-bold">播放列表</h2>
+    <a class="icon-btn" href="library.html" title="关闭">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </a>
+  </div>
+  <div class="drawer-body">
+
+    <!-- 新建播放列表 -->
+    <button class="new-playlist">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      新建播放列表
+    </button>
+
+    <!-- 播放列表集合 -->
+    <h3 class="section-title">我的列表</h3>
+    <div class="pl-row active">
+      <div class="pl-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7-4.6-9.5-9A5.5 5.5 0 0 1 12 6.2 5.5 5.5 0 0 1 21.5 12C19 16.4 12 21 12 21z"/></svg></div>
+      <div class="flex-1 min-w-0"><div class="pl-name">我的收藏</div><div class="pl-count">24 首</div></div>
+    </div>
+    <div class="pl-row">
+      <div class="pl-icon" style="background:linear-gradient(135deg,#00D4FF,#3B82F6)"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/></svg></div>
+      <div class="flex-1 min-w-0"><div class="pl-name">全部音频</div><div class="pl-count">128 首</div></div>
+    </div>
+    <div class="pl-row">
+      <div class="pl-icon" style="background:linear-gradient(135deg,#1E3A5F,#0E7490)"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></div>
+      <div class="flex-1 min-w-0"><div class="pl-name">深夜驾驶</div><div class="pl-count">12 首</div></div>
+    </div>
+    <div class="pl-row">
+      <div class="pl-icon" style="background:linear-gradient(135deg,#FF5C8A,#F59E0B)"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg></div>
+      <div class="flex-1 min-w-0"><div class="pl-name">健身节奏</div><div class="pl-count">18 首</div></div>
+    </div>
+
+    <!-- 当前列表详情 -->
+    <h3 class="section-title">当前列表 · 我的收藏</h3>
+    <div class="flex items-center gap-4 mb-3">
+      <div class="pl-detail-cover">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"><path d="M9 18V6l11-2v11"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="15" r="2.5"/></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="font-bold text-base">我的收藏</div>
+        <div class="text-secondary text-xs mt-1">24 首 · 总时长 1.6 小时</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 mb-2">
+      <button class="btn-primary flex-1 justify-center">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
+        播放全部
+      </button>
+      <button class="btn-ghost">删除列表</button>
+    </div>
+
+    <!-- 曲目行 -->
+    <div class="track-row playing">
+      <span class="row-index" style="color:#00D4FF">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V6l11-2v11"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="15" r="2.5"/></svg>
+      </span>
+      <img class="row-cover" src="https://placehold.co/100x100/7C5CFF/FFFFFF?text=%E2%99%AA" alt="夜色电台封面" onerror="this.src='https://placehold.co/100x100/1C2333/9AA3B5?text=%E2%99%AA'">
+      <div class="row-meta"><div class="row-title">夜色电台</div><div class="row-artist">星轨乐队</div></div>
+      <span class="row-dur">03:45</span>
+      <button class="row-remove" title="从列表移除">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="track-row">
+      <span class="row-index">2</span>
+      <img class="row-cover" src="https://placehold.co/100x100/00A8CC/FFFFFF?text=%E2%99%AA" alt="夏日余温封面" onerror="this.src='https://placehold.co/100x100/1C2333/9AA3B5?text=%E2%99%AA'">
+      <div class="row-meta"><div class="row-title">夏日余温</div><div class="row-artist">陈默</div></div>
+      <span class="row-dur">04:12</span>
+      <button class="row-remove" title="从列表移除">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="track-row">
+      <span class="row-index">3</span>
+      <img class="row-cover" src="https://placehold.co/100x100/FF5C8A/FFFFFF?text=%E2%99%AA" alt="Rainy Loop封面" onerror="this.src='https://placehold.co/100x100/1C2333/9AA3B5?text=%E2%99%AA'">
+      <div class="row-meta"><div class="row-title">Rainy Loop</div><div class="row-artist">Aqua Sound</div></div>
+      <span class="row-dur">05:01</span>
+      <button class="row-remove" title="从列表移除">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="track-row">
+      <span class="row-index">4</span>
+      <img class="row-cover" src="https://placehold.co/100x100/155E75/FFFFFF?text=%E2%99%AA" alt="Deep Focus封面" onerror="this.src='https://placehold.co/100x100/1C2333/9AA3B5?text=%E2%99%AA'">
+      <div class="row-meta"><div class="row-title">Deep Focus</div><div class="row-artist">Lumen</div></div>
+      <span class="row-dur">06:14</span>
+      <button class="row-remove" title="从列表移除">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="track-row">
+      <span class="row-index">5</span>
+      <img class="row-cover" src="https://placehold.co/100x100/0E7490/FFFFFF?text=%E2%99%AA" alt="雪落无声封面" onerror="this.src='https://placehold.co/100x100/1C2333/9AA3B5?text=%E2%99%AA'">
+      <div class="row-meta"><div class="row-title">雪落无声</div><div class="row-artist">林晚</div></div>
+      <span class="row-dur">05:22</span>
+      <button class="row-remove" title="从列表移除">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="track-row">
+      <span class="row-index">6</span>
+      <img class="row-cover" src="https://placehold.co/100x100/1E3A5F/FFFFFF?text=%E2%99%AA" alt="Midnight Jazz封面" onerror="this.src='https://placehold.co/100x100/1C2333/9AA3B5?text=%E2%99%AA'">
+      <div class="row-meta"><div class="row-title">Midnight Jazz</div><div class="row-artist">The Blue Note</div></div>
+      <span class="row-dur">07:05</span>
+      <button class="row-remove" title="从列表移除">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+  </div>
+</aside>
+
+<!-- 底部播放条 -->
+<footer class="player-bar">
+  <div class="glass player-inner">
+    <img class="np-cover now-playing-cover" src="https://placehold.co/200x200/7C5CFF/FFFFFF?text=%E2%99%AA" alt="正在播放封面" onerror="this.src='https://placehold.co/200x200/1C2333/9AA3B5?text=%E2%99%AA'">
+    <div class="np-meta">
+      <div class="np-title">夜色电台</div>
+      <div class="np-artist">星轨乐队</div>
+    </div>
+    <button class="icon-btn" title="上一首">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6h2v12H7zM20 6v12l-10-6z"/></svg>
+    </button>
+    <button class="play-btn-main" title="暂停">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+    </button>
+    <button class="icon-btn" title="下一首">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15 6h2v12h-2zM4 6v12l10-6z"/></svg>
+    </button>
+    <div class="hidden sm:flex items-center gap-3 flex-1 min-w-0">
+      <span class="time">1:12</span>
+      <div class="progress-track flex-1"><div class="progress-fill"></div><div class="progress-thumb"></div></div>
+      <span class="time">3:45</span>
+    </div>
+    <button class="icon-btn hidden md:inline-flex" title="循环模式">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+    </button>
+    <button class="icon-btn hidden md:inline-flex" title="音量">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  <div class="progress-track mobile-progress sm:hidden"><div class="progress-fill" style="width:38%"></div></div>
+</footer>
+
+<footer class="proto-footer">原型页面 2/3 · 播放列表面板：右侧抽屉（手机全屏）、列表增删、播放全部 · 微动效：抽屉 200ms 滑入、行 hover 高亮</footer>
+</body>
+</html>

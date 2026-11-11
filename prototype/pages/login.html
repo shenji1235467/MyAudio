@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyAudio · 登录原型</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="ambient"></div>
+
+<!-- 原型导航（仅供设计确认，非产品功能） -->
+<nav class="proto-nav">
+  <div class="max-w-7xl mx-auto px-4 h-9 flex items-center justify-between">
+    <span class="text-secondary">静态原型 · 确认设计后开发完整功能</span>
+    <div class="flex items-center gap-2">
+      <a class="proto-link" href="library.html">① 音频库</a>
+      <a class="proto-link" href="playlist.html">② 播放列表</a>
+      <a class="proto-link active" href="login.html">③ 登录</a>
+    </div>
+  </div>
+</nav>
+
+<!-- 登录主区 -->
+<main class="min-h-screen flex items-center justify-center px-4 py-10">
+  <div class="glass login-card w-full max-w-sm p-8">
+
+    <!-- Logo -->
+    <div class="text-center mb-1">
+      <span class="logo text-3xl">MyAudio</span>
+    </div>
+    <p class="text-secondary text-sm text-center mb-8">私人在线音频播放服务</p>
+
+    <!-- 密码输入 -->
+    <label class="field-label" for="password">访问密码</label>
+    <div class="search-wrap mb-4">
+      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      <input class="search-input w-full" id="password" type="password" value="password" placeholder="请输入访问密码">
+    </div>
+
+    <!-- 免登录 -->
+    <label class="remember mb-6">
+      <input type="checkbox" checked>
+      七天内免登录
+    </label>
+
+    <!-- 登录按钮 -->
+    <button class="btn-primary w-full justify-center">进入音频库</button>
+
+    <!-- 错误提示（演示样式：密码错误时显示） -->
+    <div class="error-hint">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L1 21h22L12 2zm1 14h-2v2h2v-2zm0-7h-2v5h2V9z"/></svg>
+      密码错误，请重试（演示：连续失败 5 次将锁定 10 分钟）
+    </div>
+
+    <!-- 说明 -->
+    <p class="text-xs text-secondary text-center mt-8 leading-5">
+      密码在首次启动时生成哈希并写入 config.yaml<br>
+      登录后通过会话 Cookie 保持访问状态
+    </p>
+  </div>
+</main>
+
+<footer class="proto-footer">原型页面 3/3 · 登录页：单用户密码保护 · 防暴力破解（失败限速 + 锁定） · 会话 Cookie 保持</footer>
+</body>
+</html>
