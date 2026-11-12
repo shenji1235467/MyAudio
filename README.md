@@ -3,13 +3,18 @@
 基于 **Go (Gin) + SQLite** 的轻量级私人音频流媒体服务。单二进制部署、无外部依赖、内存占用低，支持手机/电脑浏览器在线播放与管理本地 MP3、WAV、FLAC、OGG、M4A 音频。
 
 ## 页面预览
-![桌面端：目录树导航与音频库列表视图](prototype/images/1.png)
-![手机端：播放器与音频库](prototype/images/3.jpg)
-![登录页：密码访问与中英文切换](prototype/images/2.png)
+
+<table>
+  <tr>
+    <td align="center"><a href="prototype/images/1.png"><img src="prototype/images/1.png" height="220" alt="桌面端：目录树导航与音频库列表视图"></a><br>桌面端</td>
+    <td align="center"><a href="prototype/images/3.jpg"><img src="prototype/images/3.jpg" height="220" alt="手机端：播放器与音频库"></a><br>手机端</td>
+    <td align="center"><a href="prototype/images/2.png"><img src="prototype/images/2.png" height="220" alt="登录页：密码访问与中英文切换"></a><br>登录页</td>
+  </tr>
+</table>
 
 ## 使用场景
 
-手里有一台小云服务器、闲置的旧笔记本，或者一台 NAS，硬盘里攒了不少音频：成套的有声书、网课录音、播客存档，还有这些年收集的音乐。放在电脑上只能坐下来听，拷到手机里又装不下，丢进网盘听还得先下载一遍。MyAudio 想解决的就是这件事——文件是自己的，打开浏览器就能听，不用先整理成某个平台要求的样子。
+手里有一台云服务器（腾讯、阿里、华为等69元 99元/1年）、闲置的旧笔记本，或者一台 NAS，硬盘里攒了不少音频：成套的有声书、网课录音、播客存档，还有这些年收集的音乐。放在电脑上只能坐下来听，拷到手机里又装不下，丢进网盘听还得先下载一遍。MyAudio 想解决的就是这件事——文件是自己的，打开浏览器就能听，不用先整理成某个平台要求的样子。
 
 文件按原来的目录放进 `music_dir` 就好。磁盘上怎么分文件夹，页面左侧就长成什么样的目录树，按专辑、课程、年份、语种分都行；之后传了新文件，点一下「扫描」就进库，标题、艺术家和内嵌封面能读标签的会自动带上。不用先建歌单，也不用为了排序给文件改名。
 
@@ -283,23 +288,6 @@ nohup ./myaudio -config config.yaml >> myaudio.log 2>&1 & echo $! > myaudio.pid
 
 > **信号说明**：程序捕获 `SIGINT`（`Ctrl+C`）与 `SIGTERM`（`kill` 默认信号）后停止接收新连接、等待进行中的请求结束再退出，最长等待 8 秒；`kill -9`（`SIGKILL`）会强制立即终止，非必要不使用。
 
-#### 4.3 验证与访问
-
-```bash
-# 健康检查（无需登录，返回 {"status":"ok"} 即正常）
-curl http://127.0.0.1:8083/healthz
-```
-
-- **直连（无反代）**：浏览器访问 `http://<服务器IP>:8083`，需将 `listen` 改为 `:8083` 监听所有网卡。
-- **nginx SSL 反代（本项目部署方式）**：myaudio 仅监听回环 `127.0.0.1:8083`，对外由 nginx 在 `18083` 提供 HTTPS，浏览器访问 `https://<域名或服务器IP>:18083`，输入密码登录。
-
-将音频文件放入 `music_dir`，点击页面右上角扫描按钮（或等待定时扫描）即可入库。
-
-> **反代架构说明（推荐）**：服务默认绑定 `127.0.0.1:8083`，不直接暴露公网；nginx 对外监听 `18083`（SSL）并 `proxy_pass` 到 `127.0.0.1:8083`。因此防火墙只需放行对外端口 **18083**（`sudo ufw allow 18083/tcp`），后端 8083 无需对外。
->
-> **无反代、手机局域网直连**：需把 `listen` 改为 `:8083`（监听所有网卡），手机与服务器同一局域网，访问 `http://<服务器局域网IP>:8083`，并放行 8083 端口。
-
-> 生产环境建议使用下一节的 **systemd 托管**，可获得开机自启、崩溃自动重启与统一的 `systemctl` 启停管理，无需手动维护 PID。
 
 ## systemd 部署（推荐）
 
@@ -347,79 +335,6 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 >
 > 若不使用反代、改为 `:8083` 全网卡直连，则放行 8083 端口即可。
 
-## 故障排查
-
-### `./run.sh start` 报 `[ FAIL ] 未找到 Go 工具链`
-
-**现象**（2026-11-12，Debian 13 / x86_64，仓库根目录执行）：
-
-```text
-➜ ./run.sh start
-[ WARN ] 二进制不存在，先执行编译 ...
-[run.sh] 编译 ./cmd/myaudio ...
-[ FAIL ] 未找到 Go 工具链，请安装 Go 1.22+ 或将其加入 PATH
-```
-
-**原因**
-
-1. `run.sh start` 发现 `myaudio` 不存在时会自动调用 `do_build` 编译；该环境 `PATH` 中没有 `go`，`/usr/local/go/bin/go` 也不存在，编译随即中止。
-2. 错误文案写的是「Go 1.22+」，但 `go.mod` 声明 `go 1.26.0`，README「快速开始」也沿用了 1.22+；按旧提示安装低版本 Go 仍会因依赖解析失败。
-3. 仓库自带 `dist/myaudio_v1.0.1_linux_amd64.tar.gz`（含已编译二进制与 `.sha256`），旧脚本没有利用，导致无 Go 的离线环境无法启动。
-
-**已修复**
-
-- `run.sh` 新增 `restore_from_release()`：无 Go 工具链时，按 `uname -s/-m` 推导平台（如 `linux_amd64`），在 `dist/` 中选取匹配的最新发布包，先用 `sha256sum -c` 校验完整性，再解压出 `myaudio`（权限 `0755`）作为 `build` 的结果；找不到可用包时才报错，并给出从 `go.mod` 读取的准确版本要求、PATH 配置与发布包放置建议。
-- `run.sh` 新增 `listen_sockets()`：最小化镜像常缺 `ss`（iproute2），原先端口占用预检会静默失效，启动轮询与 `status` 误报「未检测到端口监听」。现在自动回退 `netstat` 并统一列格式，端口冲突检测与占用进程定位均可用。
-- 文档与脚本提示中的 Go 版本统一为 **`go.mod` 的 1.26.0+**。
-
-**处理方式（任选其一）**
-
-| 场景 | 操作 |
-|---|---|
-| 仓库带 `dist/` 发布包（推荐，无需 Go） | 直接 `./run.sh start`，脚本自动校验并恢复二进制 |
-| 需要修改源码重新编译 | 安装 Go 1.26.0+，`export PATH=/usr/local/go/bin:$PATH`，用 `go version` 确认后执行 `./run.sh build` |
-| Go 已安装但不在 PATH | 把 `/usr/local/go/bin` 写入 `~/.zshrc` / `~/.bashrc` 的 `PATH` 后重试 |
-| 手工使用发布包 | `cd dist && sha256sum -c <包名>.tar.gz.sha256`，`tar -xzf <包名>.tar.gz`，把包内 `myaudio` 复制到仓库根目录并 `chmod +x` |
-
-> 发布包由 `scripts/release.sh` 生成，仅含运行时文件。若 `dist/` 中的包与本机平台不匹配（如 arm64 机器只有 amd64 包），需在有 Go 的机器上用 `TARGETS=linux/arm64 ./scripts/release.sh` 重新打包，或安装 Go 后本地编译。
-
-**验证结果**（本机，主实例保持运行；另用 `127.0.0.1:18084` 的第二实例做完整启动链路验证）：
-
-- `bash -n run.sh` 通过；`./run.sh build` → `[  OK  ] 已从发布包恢复：/workspace/myaudio (25M)`，二进制权限 `0755`。
-- 第二实例 `start` 无警告通过（`[  OK  ] 服务已启动`），`status` → `[  OK  ] 端口 127.0.0.1:18084 正在监听`，`health` 返回 `{"status":"ok"}`，`stop` 优雅退出。
-- 主实例 `./run.sh health` → `{"status":"ok"}`；重复执行 `./run.sh start` 能正确提示「服务已在运行」。
-- 从源码编译的分支本环境没有 Go 工具链，未实测；预编译包回退与端口检测分支均已实测通过。
-
-> 首次启动会按既有行为把 `config.yaml` 中的明文 `password` 转为 `password_hash` 并重写配置文件（注释与时长格式被规范化），属正常现象，详见「3. 初始化密码与首次登录」。
-
-## API 一览
-
-除 `/healthz`、`/login`、`/api/auth/login` 与静态资源外，均需登录会话。
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/auth/status` | 当前登录状态 |
-| POST | `/api/auth/login` | 密码登录，下发会话 Cookie |
-| POST | `/api/auth/logout` | 退出登录 |
-| GET | `/api/tracks` | 曲目分页/搜索（`keyword`、`order`、`dir`、`page`、`per_page`） |
-| GET | `/api/dirs` | 目录导航：聚合各相对目录及曲目数（含子目录，根目录用空串） |
-| GET | `/api/tracks/:id` | 曲目详情 |
-| DELETE | `/api/tracks/:id?delete_file=true` | 删除曲目（可选删文件） |
-| GET | `/api/stream/:id` | 流式播放（支持 Range / 206） |
-| GET | `/api/cover/:id` | 内嵌封面（带缓存） |
-| GET | `/api/stats` | 库统计与扫描状态 |
-| POST | `/api/scan` | 手动触发扫描（防重入） |
-| GET | `/api/positions` | 全部播放位置（按最近更新倒序，首条即上次播放） |
-| GET | `/api/positions/:id` | 单条播放位置（无记录返回 `position:0`） |
-| PUT | `/api/positions/:id` | 保存/更新播放位置，请求体 `{"position": 秒}` |
-| DELETE | `/api/positions/:id` | 清除某曲目播放位置（曲目删除时外键级联自动清除） |
-| GET/POST | `/api/playlists` | 播放列表列表 / 新建 |
-| PUT/DELETE | `/api/playlists/:id` | 重命名 / 删除 |
-| GET | `/api/playlists/:id/tracks` | 列表内曲目 |
-| POST/DELETE | `/api/playlists/:id/tracks/:trackID` | 加入 / 移除曲目 |
-
-> `GET /api/tracks` 的 `order` 取值：`created_at`（最新）、`filename`（文件名，前端默认）、`title`、`artist`、`album`；`dir` 为相对目录，空串表示根目录（全部），传具体目录时按该目录及其子目录过滤。后端错误统一以 `{code, error, msg}` 结构返回，前端依据 `code` 做中英文本地化映射。
-
 ## 前端界面与本地状态
 
 前端为零构建、零框架的原生实现，所有用户偏好均保存在浏览器 `localStorage`（键名统一以 `myaudio_` 开头），清除站点数据即可恢复默认：
@@ -443,17 +358,6 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 **国际化（i18n）**：`web/i18n.js` 提供全局 `t(key, params)` 与 `I18N.setLang/toggleLang`，静态文本通过 `data-i18n`（及 `data-i18n-placeholder/title/aria-label/alt`）绑定，动态文案在代码中调用 `t()`；切换语言时派发 `langchange` 事件，业务代码据此重建动态 DOM。新增词条只需同步编辑 `web/locales/zh-CN.js` 与 `web/locales/en.js`。
 
 > 由于前端资源通过 `embed` 编译进二进制，**修改 `web/` 后必须重新 `./run.sh build && ./run.sh restart`（或重新 `go build` 并重启）才会生效**；浏览器侧再做一次强制刷新（`Ctrl/Cmd + Shift + R`）以跳过缓存。
-
-## 设计说明
-
-- **数据模型**：`tracks`、`playlists`、`playlist_tracks`、`play_positions` 四表，外键级联删除；播放列表用 `position` 维护顺序，播放位置以 `track_id` 为主键记录 `position`/`updated_at`（单用户全局一份，实现跨设备续播）；`tracks` 含 `dir`/`filename` 列并建有索引，支撑目录导航与文件名排序
-- **增量扫描**：以文件绝对路径唯一约束 + 修改时间判断变更，未变更文件跳过标签解析；扫描并发度限制为 `min(CPU, 4)`，控制 fd 与内存
-- **封面存储**：内嵌封面以音频路径的 SHA1 命名落盘到 `data/covers`，通过 `/api/cover/:id` 提供并设置浏览器缓存
-- **WAV 时长**：直接解析 RIFF 文件头得到精确时长；其他格式按平均码率估算
-- **目录聚合**：`ListDirs` 按 `dir` 分组统计，每个目录的曲目数用 `dir = ? OR dir LIKE ?`（参数为 `目录` 与 `目录/%`）做前缀匹配，天然包含其所有子目录
-- **错误本地化**：后端返回稳定的错误码 `code` 而非硬编码文案，前端按 `code` 映射到当前语言，兼容旧版中文串
-- **优雅退出**：捕获 `SIGINT/SIGTERM`，停止接收新连接并在 8 秒内完成在途请求
-
 
 ## 许可证
 
