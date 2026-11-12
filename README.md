@@ -174,6 +174,36 @@ CONFIG=/opt/myaudio/test.yaml ./run.sh reset-password   # 多实例同样支持
 
 > 重启后程序会按既有行为用 YAML 序列化重写配置文件：把明文 `password` 转为 bcrypt 哈希写入 `password_hash` 并清空明文（之后登录校验只使用哈希，终端打印的新密码请立即保存），同时注释会丢失、字段顺序与时长格式被规范化。这与重置命令无关，`.bak` 保留了重置前的完整原文。
 
+#### 4.1 确认线上跑的是哪次构建
+
+前端资源通过 `embed` 编译进二进制，**换前端必须重新编译并重启**，只替换 `web/` 目录下的文件不会生效。判断当前进程是不是最新构建，看 `/healthz`：
+
+```bash
+curl -s http://127.0.0.1:8083/healthz
+# {"status":"ok","revision":"600766c07097","assets":"\"ee8378009e340a8d\""}
+```
+
+- `revision`：编译时的 Git 提交（`go build` 自动注入的 `vcs.revision`），前 12 位
+- `assets`：`style.css` 的内容指纹，前端一改它必变
+
+`revision` 与仓库最新提交不一致，说明部署的还是旧构建，重新编译即可：
+
+```bash
+./run.sh build && ./run.sh restart
+```
+
+#### 4.2 前端资源缓存策略
+
+服务端对三类响应分别处理，避免升级后浏览器仍用旧 CSS/JS 显示旧布局：
+
+| 资源 | 响应头 | 说明 |
+|---|---|---|
+| HTML（`/`、`/login`） | `Cache-Control: no-store` | 页面结构随版本变化，一律回源 |
+| CSS/JS/locales | `Cache-Control: no-cache` + `ETag` | 每次回源校验，未变返回 `304` |
+| 页面内引用的静态资源 | `/style.css?v=<指纹>` | URL 带内容指纹，内容变则 URL 变 |
+
+因为资源名不带文件哈希，不能给长 `max-age` 缓存——一旦缓存住旧 CSS，升级后仍会看到旧版布局。这里用 `no-cache` + `ETag` 协商缓存，配合 HTML 里的 `?v=` 指纹：既不牺牲带宽，也不会被旧缓存钉死。
+
 脚本通过 PID 文件（默认 `myaudio.pid`）跟踪进程，能识别过期 PID、避免重复启动。多实例可用环境变量隔离：
 
 ```bash
