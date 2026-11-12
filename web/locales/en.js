@@ -138,5 +138,6 @@
     'err.invalidTrackID': 'Invalid track ID',
     'err.emptyName': 'Name cannot be empty',
     'err.dirQueryFailed': 'Failed to query directories: {msg}',
+    'err.invalidPosition': 'Invalid playback position',
   };
 })();

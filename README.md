@@ -7,7 +7,7 @@
 - **目录扫描入库**：递归扫描本地音频目录，自动解析标题/艺术家/专辑与内嵌封面；支持启动扫描、定时扫描、页面手动扫描，按路径+修改时间增量更新
 - **目录树导航**：左右分栏布局，左侧依据音频相对目录生成可展开/折叠的层级树（自动补齐中间层级），蓝色高亮当前选中目录并显示各目录（含子目录）曲目数；选中目录与展开状态跨刷新记忆，首次进入默认全部展开；窄屏（≤900px）下侧边栏自动变为抽屉式
 - **在线流播放**：支持 HTTP Range 请求，可拖动进度条、断点续播；手机锁屏/蓝牙线控（Media Session API）
-- **播放位置记忆**：按曲目分别记忆播放进度（浏览器 localStorage），刷新页面后自动恢复上次曲目与位置并提供「一键续播」；播放中节流落盘，暂停/关闭页面前再保存，完整播完或删除曲目时自动清除
+- **播放位置记忆（服务器端）**：按曲目分别记忆播放进度并持久化到服务器 SQLite，**任意设备/浏览器登录后都能同步恢复**上次曲目与位置并提供「一键续播」；播放中节流（每 3 秒）同步，暂停/切后台/关闭页面时通过 `sendBeacon` 兜底保存，完整播完或删除曲目时自动清除
 - **浏览与搜索**：封面网格 / 列表两种视图，按标题/艺术家/专辑关键词即时搜索；支持文件名/标题/艺术家/专辑/最新多种排序（默认按文件名）与分页
 - **中英文双语**：内置零依赖 i18n 引擎，登录页与主应用一键切换简体中文 / English，语言偏好本地持久化，切换即时生效
 - **播放列表**：创建/重命名/删除播放列表，曲目加入/移除，连续播放、列表循环、随机播放三种模式
@@ -287,6 +287,10 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 | GET | `/api/cover/:id` | 内嵌封面（带缓存） |
 | GET | `/api/stats` | 库统计与扫描状态 |
 | POST | `/api/scan` | 手动触发扫描（防重入） |
+| GET | `/api/positions` | 全部播放位置（按最近更新倒序，首条即上次播放） |
+| GET | `/api/positions/:id` | 单条播放位置（无记录返回 `position:0`） |
+| PUT | `/api/positions/:id` | 保存/更新播放位置，请求体 `{"position": 秒}` |
+| DELETE | `/api/positions/:id` | 清除某曲目播放位置（曲目删除时外键级联自动清除） |
 | GET/POST | `/api/playlists` | 播放列表列表 / 新建 |
 | PUT/DELETE | `/api/playlists/:id` | 重命名 / 删除 |
 | GET | `/api/playlists/:id/tracks` | 列表内曲目 |
@@ -307,12 +311,12 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 | `myaudio_dir` | 当前选中的相对目录（空串 = 根目录/全部） |
 | `myaudio_dir_expanded` | 目录树中展开的目录路径数组 |
 | `myaudio_mode` / `myaudio_speed` | 播放模式 / 播放倍速 |
-| `myaudio_positions` | 各曲目播放进度（按曲目 ID 存秒，最多保留 200 条自动淘汰） |
-| `myaudio_last_track` | 上次播放的曲目 ID，用于刷新后恢复会话 |
+
+> 播放进度与“上次播放曲目”**不再保存在浏览器**，而是存于服务器（见下）。升级前写在本地的 `myaudio_positions` / `myaudio_last_track` 两个键会在新版本加载时自动清除。
 
 **目录树**：后端 `/api/dirs` 返回的是“含曲目的扁平相对目录”，前端 `buildDirTree()` 按 `/` 拆分补齐中间层级组装成树；父目录曲目数取该目录及所有子目录之和；选中项以蓝色高亮（独立于品牌紫），桌面端左侧常驻吸顶，窄屏（≤900px）折叠为带遮罩的抽屉。
 
-**播放位置记忆**：播放中每 3 秒节流保存一次进度，并在暂停、页面隐藏（`visibilitychange`）、关闭/刷新（`pagehide`）时补存；刷新后自动加载上次曲目并定位到记忆位置（受浏览器自动播放策略限制不会主动出声），点击播放器上的续播徽标即从该位置继续。距开头不足 5 秒或临近结尾按从头播放处理。
+**播放位置记忆（服务器端，跨设备同步）**：进度保存在 SQLite 的 `play_positions` 表（`track_id` 外键级联，曲目删除即自动清理，容量上限 200 条，超出淘汰最久未更新者）。前端启动时通过 `GET /api/positions` 一次性拉取并在内存缓存，之后读进度走缓存、写进度走 `PUT /api/positions/:id`。播放中每 3 秒节流同步，并在暂停、页面隐藏（`visibilitychange`）、关闭/刷新（`pagehide`）时用 `navigator.sendBeacon`（不支持时退化为 `keepalive` fetch）兜底保存，避免请求被页面卸载中断。刷新或换设备登录后自动加载上次曲目并定位到记忆位置（受浏览器自动播放策略限制不会主动出声），点击播放器上的续播徽标即从该位置继续。距开头不足 5 秒或临近结尾按从头播放处理。
 
 **国际化（i18n）**：`web/i18n.js` 提供全局 `t(key, params)` 与 `I18N.setLang/toggleLang`，静态文本通过 `data-i18n`（及 `data-i18n-placeholder/title/aria-label/alt`）绑定，动态文案在代码中调用 `t()`；切换语言时派发 `langchange` 事件，业务代码据此重建动态 DOM。新增词条只需同步编辑 `web/locales/zh-CN.js` 与 `web/locales/en.js`。
 
@@ -320,7 +324,7 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 
 ## 设计说明
 
-- **数据模型**：`tracks`、`playlists`、`playlist_tracks` 三表，外键级联删除，播放列表用 `position` 维护顺序；`tracks` 含 `dir`/`filename` 列并建有索引，支撑目录导航与文件名排序
+- **数据模型**：`tracks`、`playlists`、`playlist_tracks`、`play_positions` 四表，外键级联删除；播放列表用 `position` 维护顺序，播放位置以 `track_id` 为主键记录 `position`/`updated_at`（单用户全局一份，实现跨设备续播）；`tracks` 含 `dir`/`filename` 列并建有索引，支撑目录导航与文件名排序
 - **增量扫描**：以文件绝对路径唯一约束 + 修改时间判断变更，未变更文件跳过标签解析；扫描并发度限制为 `min(CPU, 4)`，控制 fd 与内存
 - **封面存储**：内嵌封面以音频路径的 SHA1 命名落盘到 `data/covers`，通过 `/api/cover/:id` 提供并设置浏览器缓存
 - **WAV 时长**：直接解析 RIFF 文件头得到精确时长；其他格式按平均码率估算

@@ -19,6 +19,7 @@ const (
 	codeNotFound         = "NOT_FOUND"
 	codeInvalidPassword  = "INVALID_PASSWORD"
 	codeTooManyAttempts  = "TOO_MANY_ATTEMPTS"
+	codeInvalidPosition  = "INVALID_POSITION"
 )
 
 // apiErr 统一的错误响应：code 供前端映射多语言文案，error 为英文简述，msg 携带可选细节

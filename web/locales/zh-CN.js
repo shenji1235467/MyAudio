@@ -138,5 +138,6 @@
     'err.invalidTrackID': '无效的曲目 ID',
     'err.emptyName': '名称不能为空',
     'err.dirQueryFailed': '查询目录失败: {msg}',
+    'err.invalidPosition': '播放位置无效',
   };
 })();

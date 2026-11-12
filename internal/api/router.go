@@ -52,6 +52,12 @@ func (h *Handler) Register(r *gin.Engine) {
 		api.GET("/stats", h.stats)
 		api.POST("/scan", h.triggerScan)
 
+		// 服务器端播放位置记忆（跨设备同步）
+		api.GET("/positions", h.listPositions)
+		api.GET("/positions/:id", h.getPosition)
+		api.PUT("/positions/:id", h.putPosition)
+		api.DELETE("/positions/:id", h.deletePosition)
+
 		api.GET("/playlists", h.listPlaylists)
 		api.POST("/playlists", h.createPlaylist)
 		api.PUT("/playlists/:id", h.renamePlaylist)

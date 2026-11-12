@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -96,6 +97,13 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
     PRIMARY KEY (playlist_id, track_id)
 );
 CREATE INDEX IF NOT EXISTS idx_pt_playlist ON playlist_tracks(playlist_id, position);
+
+-- 服务器端播放位置记忆：单用户服务，全局一份；曲目删除时随外键级联清除
+CREATE TABLE IF NOT EXISTS play_positions (
+    track_id    INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    position    REAL NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `
 	if _, err := s.db.Exec(ddl); err != nil {
 		return fmt.Errorf("数据库迁移失败: %w", err)
@@ -576,4 +584,70 @@ func (s *Store) resequence(playlistID int64) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// ---------------- 播放位置（服务器端记忆，跨设备同步） ----------------
+
+// maxPlayPositions 记忆条目的容量上限，超出后淘汰最久未更新的记录
+const maxPlayPositions = 200
+
+// UpsertPlayPosition 保存（或更新）某曲目的播放位置；存在外键约束，曲目不存在会返回错误
+func (s *Store) UpsertPlayPosition(trackID int64, position float64) error {
+	if position < 0 {
+		position = 0
+	}
+	if _, err := s.db.Exec(`
+		INSERT INTO play_positions (track_id, position, updated_at)
+		VALUES (?, ?, datetime('now'))
+		ON CONFLICT(track_id) DO UPDATE SET position=excluded.position, updated_at=datetime('now')`,
+		trackID, position); err != nil {
+		return err
+	}
+	// 容量兜底：超出上限时删除最久未更新的若干条
+	if _, err := s.db.Exec(`
+		DELETE FROM play_positions WHERE track_id IN (
+			SELECT track_id FROM play_positions ORDER BY updated_at ASC, track_id ASC
+			LIMIT (SELECT MAX(0, COUNT(*) - ?) FROM play_positions)
+		)`, maxPlayPositions); err != nil {
+		return err
+	}
+	return nil
+}
+
+// GetPlayPosition 读取单条播放位置；无记录时返回 (0, nil)
+func (s *Store) GetPlayPosition(trackID int64) (float64, error) {
+	var pos float64
+	err := s.db.QueryRow(`SELECT position FROM play_positions WHERE track_id=?`, trackID).Scan(&pos)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return pos, err
+}
+
+// ListPlayPositions 返回全部播放位置，按最近更新时间倒序（首条即“上次播放”）
+func (s *Store) ListPlayPositions() ([]model.PlayPosition, error) {
+	rows, err := s.db.Query(`SELECT track_id, position, updated_at FROM play_positions ORDER BY updated_at DESC, track_id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]model.PlayPosition, 0)
+	for rows.Next() {
+		var p model.PlayPosition
+		var updatedAt string
+		if err := rows.Scan(&p.TrackID, &p.Position, &updatedAt); err != nil {
+			return nil, err
+		}
+		if t, perr := time.Parse(sqliteTimeLayout, updatedAt); perr == nil {
+			p.UpdatedAt = t
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// DeletePlayPosition 清除某曲目的播放位置；无记录时不报错
+func (s *Store) DeletePlayPosition(trackID int64) error {
+	_, err := s.db.Exec(`DELETE FROM play_positions WHERE track_id=?`, trackID)
+	return err
 }

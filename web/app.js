@@ -50,6 +50,7 @@ const ERROR_CODE_KEYS = {
   'TOO_MANY_ATTEMPTS': 'login.tooManyAttempts',
   'QUERY_FAILED': 'err.queryFailed',
   'DIR_QUERY_FAILED': 'err.dirQueryFailed',
+  'INVALID_POSITION': 'err.invalidPosition',
 };
 
 // 兼容改造前后端直接返回的中文字符串
@@ -151,40 +152,51 @@ const state = {
 
 const audio = $('audio');
 
-// ---------------- 浏览器记忆播放位置（localStorage，按曲目分别记忆） ----------------
-const POS_MAP_KEY = 'myaudio_positions';   // { [trackId]: 秒 }
-const POS_LAST_KEY = 'myaudio_last_track'; // 上次播放的曲目 ID
-const POS_SAVE_GAP = 3;                    // 播放中最多每 3 秒落盘一次，避免频繁写入
-const POS_MIN_RESUME = 5;                  // 距开头不足 5 秒视为从头播放，不提示续播
-const POS_MAX_ENTRIES = 200;               // 最多记忆的曲目数，超出淘汰最旧条目
+// ---------------- 服务器端记忆播放位置（跨设备/浏览器同步） ----------------
+// 进度保存在后端 SQLite，任意位置登录后都能恢复；前端维护一份内存缓存避免频繁请求。
+const POS_SAVE_GAP = 3;        // 播放中最多每 3 秒同步一次，避免频繁请求
+const POS_MIN_RESUME = 5;      // 距开头不足 5 秒视为从头播放，不提示续播
+const posCache = new Map();    // trackId(Number) -> 秒（Number）
+let positionsLoaded = false;   // 是否已从服务器拉取过全量进度
+let lastTrackId = 0;           // 服务器记录的“上次播放”曲目 ID（列表首条）
 
-function readPositions() {
-  try { return JSON.parse(localStorage.getItem(POS_MAP_KEY) || '{}') || {}; }
-  catch (_) { return {}; }
-}
-function writePositions(map) {
-  try { localStorage.setItem(POS_MAP_KEY, JSON.stringify(map)); } catch (_) { /* 配额不足等忽略 */ }
+// 启动时拉取全部播放位置，填充内存缓存与上次播放曲目
+async function loadPositions() {
+  try {
+    const list = await api('/api/positions');
+    posCache.clear();
+    (list || []).forEach((p) => {
+      if (p && p.track_id && Number.isFinite(p.position)) posCache.set(Number(p.track_id), p.position);
+    });
+    lastTrackId = list && list.length ? Number(list[0].track_id) : 0;
+    positionsLoaded = true;
+  } catch (_) {
+    positionsLoaded = false; // 拉取失败时退化为不记忆，不阻断主界面
+  }
 }
 function getSavedPosition(trackId) {
-  const pos = readPositions()[trackId];
+  const pos = posCache.get(Number(trackId));
   return Number.isFinite(pos) && pos > 0 ? pos : 0;
 }
-// 记录某曲目播放位置；条目过多时按最久未更新淘汰
-function savePosition(trackId, sec) {
+// 保存到服务器并同步内存缓存（失败静默：播放体验优先，下次定时保存会重试）
+async function savePosition(trackId, sec) {
   if (!trackId || !Number.isFinite(sec) || sec <= 0) return;
-  const map = readPositions();
-  map[trackId] = Math.floor(sec);
-  const keys = Object.keys(map);
-  if (keys.length > POS_MAX_ENTRIES) {
-    // 无时间戳时退化为删除字典序最靠前的若干条目，仅做容量兜底
-    keys.slice(0, keys.length - POS_MAX_ENTRIES).forEach((k) => { delete map[k]; });
-  }
-  writePositions(map);
+  posCache.set(Number(trackId), Math.floor(sec));
+  lastTrackId = Number(trackId);
+  try {
+    await api(`/api/positions/${trackId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ position: Math.floor(sec) }),
+    });
+  } catch (_) { /* 网络/权限异常忽略，不打断播放 */ }
 }
-function clearPosition(trackId) {
+// 清除服务器上的某曲目进度（完整播完或删除曲目时）
+async function clearPosition(trackId) {
   if (!trackId) return;
-  const map = readPositions();
-  if (trackId in map) { delete map[trackId]; writePositions(map); }
+  posCache.delete(Number(trackId));
+  try {
+    await api(`/api/positions/${trackId}`, { method: 'DELETE' });
+  } catch (_) { /* 忽略 */ }
 }
 // 待元数据就绪后跳转的续播位置（秒）；0 表示从头播放
 let pendingResume = 0;
@@ -293,7 +305,7 @@ async function deleteTrack(id) {
   try {
     await api(`/api/tracks/${id}?delete_file=${deleteFile}`, { method: 'DELETE' });
     toast(t('track.deleted'), 'success');
-    clearPosition(id);
+    posCache.delete(Number(id));   // 服务器外键级联已删除进度，这里仅同步本地缓存
     state.tracks = state.tracks.filter((t) => t.id !== id);
     renderTracks();
     refreshStats();
@@ -515,7 +527,7 @@ audio.addEventListener('pause', () => {
 });
 audio.addEventListener('ended', () => {
   const tr = state.queue[state.queuePos];
-  if (tr) clearPosition(tr.id);   // 完整播完，清除该曲目的记忆位置
+  if (tr) { posCache.delete(Number(tr.id)); clearPosition(tr.id); }   // 完整播完，清除服务器记忆位置
   playNext(true);
 });
 audio.addEventListener('loadedmetadata', () => {
@@ -541,19 +553,47 @@ audio.addEventListener('error', () => {
   if (audio.src) toast(t('player.audioLoadFailed'), 'error');
 });
 
-// 保存当前曲目进度，并记录“上次播放曲目”用于刷新后续播
-function persistCurrentPosition() {
+// 计算当前应保存的进度秒；临近结尾或无有效时长时返回 null（不记忆）
+function currentSavablePosition() {
   const tr = state.queue[state.queuePos];
-  if (!tr || !Number.isFinite(audio.currentTime) || !Number.isFinite(audio.duration)) return;
-  // 临近结尾不再记忆（下次从头开始）
-  if (audio.duration && audio.currentTime >= audio.duration - 2) return;
-  savePosition(tr.id, audio.currentTime);
-  localStorage.setItem(POS_LAST_KEY, String(tr.id));
+  if (!tr || !Number.isFinite(audio.currentTime)) return null;
+  if (audio.duration && audio.currentTime >= audio.duration - 2) return null;
+  return { trackId: tr.id, sec: audio.currentTime };
+}
+// 常规保存：节流场景下走异步 PUT
+function persistCurrentPosition() {
+  const p = currentSavablePosition();
+  if (p) savePosition(p.trackId, p.sec);
+}
+// 页面卸载/切后台：fetch 可能被浏览器中断，优先用 sendBeacon 保证请求发出
+function persistOnUnload() {
+  const p = currentSavablePosition();
+  if (!p) return;
+  const sec = Math.floor(p.sec);
+  posCache.set(Number(p.trackId), sec);
+  lastTrackId = Number(p.trackId);
+  const payload = JSON.stringify({ position: sec });
+  let delivered = false;
+  if (navigator.sendBeacon) {
+    try { delivered = navigator.sendBeacon(`/api/positions/${p.trackId}`, new Blob([payload], { type: 'application/json' })); } catch (_) { delivered = false; }
+  }
+  if (!delivered) {
+    // sendBeacon 不可用或被拒：退化为 keepalive fetch（页面关闭后仍尽量完成）
+    try {
+      fetch(`/api/positions/${p.trackId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+        credentials: 'same-origin',
+      }).catch(() => {});
+    } catch (_) { /* 尽力而为 */ }
+  }
 }
 // 页面关闭 / 刷新 / 切后台前再保存一次，最大限度避免进度丢失
-window.addEventListener('pagehide', persistCurrentPosition);
+window.addEventListener('pagehide', persistOnUnload);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') persistCurrentPosition();
+  if (document.visibilityState === 'hidden') persistOnUnload();
 });
 
 // ---------------- 续播徽标 ----------------
@@ -1092,12 +1132,11 @@ document.addEventListener('langchange', () => {
   if ($('modalMask').classList.contains('open')) openModal();
 });
 
-// 刷新后恢复上次播放的曲目与位置（不自动播放，由浏览器策略限制，用户点播放即从记忆位置继续）
+// 刷新后恢复上次播放的曲目与位置（数据来自服务器，任意设备登录均可恢复；不自动播放）
 async function restoreLastSession() {
-  const lastId = Number(localStorage.getItem(POS_LAST_KEY));
-  if (!lastId) return;
+  if (!positionsLoaded || !lastTrackId) return;
   try {
-    const tr = await api('/api/tracks/' + lastId);
+    const tr = await api('/api/tracks/' + lastTrackId);
     state.queue = [tr];
     state.queuePos = 0;
     loadTrack(tr, true);
@@ -1115,8 +1154,16 @@ setMode(state.mode, true);
 setSpeed(state.speed, true);
 resetSleepOptionText();
 loadDirs().catch((err) => toast(err.message, 'error'));
-loadTracks(true)
+// 先拉取服务器端播放进度，再加载曲库并恢复上次会话，保证续播位置可用
+loadPositions()
+  .then(() => loadTracks(true))
   .then(restoreLastSession)
   .catch((err) => toast(err.message, 'error'));
 refreshStats();
 setInterval(refreshStats, 30000);
+
+// 清理历史版本写在浏览器本地的播放位置键（现已迁移到服务器端，避免残留误导）
+try {
+  localStorage.removeItem('myaudio_positions');
+  localStorage.removeItem('myaudio_last_track');
+} catch (_) { /* 忽略 */ }

@@ -44,6 +44,18 @@ type PlaylistTrack struct {
 	Position   int   `json:"position"`
 }
 
+// PlayPosition 服务器端记忆的曲目播放位置（跨设备/浏览器同步）
+type PlayPosition struct {
+	TrackID   int64     `json:"track_id"`
+	Position  float64   `json:"position"`             // 播放进度（秒）
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SavePositionInput 保存播放位置的请求体
+type SavePositionInput struct {
+	Position float64 `json:"position"` // 播放进度（秒）
+}
+
 // ScanResult 一次扫描的统计结果
 type ScanResult struct {
 	Scanned    int   `json:"scanned"` // 扫描到的音频文件数
