@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# MyAudio 服务管理脚本：封装编译、启动、停止、重启、状态与日志查看。
+# MyAudio 服务管理脚本：封装编译、启动、停止、重启、状态、日志查看与密码重置。
 # 用法：./run.sh <命令>
 # 可用 CONFIG / PID_FILE / LOG_FILE 环境变量覆盖默认路径，便于多实例隔离。
 #
@@ -254,6 +254,66 @@ do_restart() {
 	do_start
 }
 
+# 生成 16 位 URL 安全随机密码（仅依赖 coreutils）
+random_password() {
+	local pw
+	pw="$(head -c 18 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=[:space:]')"
+	printf '%s' "${pw:0:16}"
+}
+
+# 重置访问密码：替换配置中的 password / password_hash，运行中的实例自动重启生效。
+# 用法：do_reset_password [新密码]；不传则自动生成随机密码。
+do_reset_password() {
+	[ -f "$CONFIG" ] || { err "配置文件不存在：$CONFIG（先执行一次 $0 start 生成配置）"; exit 1; }
+
+	local pw="${1:-}"
+	if [ -z "$pw" ]; then
+		pw="$(random_password)"
+		info "未指定新密码，已生成随机密码"
+	fi
+	if [[ "$pw" == *$'\n'* || "$pw" == *$'\r'* ]]; then
+		err "密码不能包含换行符"
+		exit 1
+	fi
+
+	# YAML 单引号标量：内部单引号成对转义，其余字符（空格、\、"）均为字面量。
+	local sq="'" dq="''"
+	local quoted="${sq}${pw//$sq/$dq}${sq}"
+	local tmp
+	tmp="$(mktemp "${CONFIG}.XXXXXX")"
+	chmod 600 "$tmp"
+	# 通过环境变量传值，避免 awk -v 解析密码中的反斜杠转义；其余配置行与注释原样保留。
+	if ! NEW_PASSWORD="$quoted" awk '
+		/^[[:space:]]*password[[:space:]]*:/ || /^[[:space:]]*password_hash[[:space:]]*:/ {
+			if (!inserted) { print "password: " ENVIRON["NEW_PASSWORD"]; inserted = 1 }
+			next
+		}
+		{ print }
+		END { if (!inserted) print "password: " ENVIRON["NEW_PASSWORD"] }
+	' "$CONFIG" > "$tmp"; then
+		rm -f "$tmp"
+		err "写入配置失败，原配置未改动"
+		exit 1
+	fi
+	# 备份后原子替换，保留 0600 权限，防止密码泄露且便于回滚。
+	cp -p "$CONFIG" "${CONFIG}.bak"
+	chmod 600 "${CONFIG}.bak"
+	mv -f "$tmp" "$CONFIG"
+	chmod 600 "$CONFIG"
+	ok "新密码已写入 $CONFIG（备份：${CONFIG}.bak）"
+	ok "访问密码：$pw （仅本次显示，请妥善保存）"
+
+	# 重启后程序会把明文 password 转为 bcrypt 哈希写回配置，并清空内存中的旧会话。
+	local pid; pid="$(resolve_pid)"
+	if [ -n "$pid" ]; then
+		info "服务正在运行，重启使新密码生效（旧登录会话将失效）..."
+		do_stop
+		do_start
+	else
+		info "服务未运行，新密码将在下次 $0 start 时生效"
+	fi
+}
+
 do_status() {
 	parse_listen
 	if is_running; then
@@ -327,6 +387,10 @@ ${BLUE}MyAudio 服务管理脚本${NC}
   stop         优雅停止（SIGTERM，最多等待 10s；PID 文件丢失时自动定位孤儿进程）
   force-stop   强制终止（SIGKILL，非必要不使用；同样支持孤儿进程回收）
   restart      重启（先 stop 再 start）
+  reset-password [新密码]
+               重置访问密码（不传则生成 16 位随机密码），自动重启运行中的服务使其生效；
+               仅替换配置里的 password / password_hash，其余配置不变，并生成 .bak 备份
+  passwd       reset-password 的别名
   status       查看运行状态、PID、内存与监听端口；PID 丢失但端口被占用时给出诊断
   health       调用 /healthz 健康检查
   logs [N]     查看实时日志（默认显示最后 100 行）
@@ -341,6 +405,8 @@ ${BLUE}MyAudio 服务管理脚本${NC}
 示例：
   ./run.sh build && ./run.sh start
   ./run.sh restart
+  ./run.sh reset-password                     # 随机新密码
+  ./run.sh reset-password 'MyNewP@ss'         # 指定新密码
   CONFIG=/opt/myaudio/test.yaml ./run.sh start
 EOF
 }
@@ -352,6 +418,7 @@ case "${1:-help}" in
 	stop)       do_stop ;;
 	force-stop) do_force_stop ;;
 	restart)    do_restart ;;
+	reset-password|passwd) shift; do_reset_password "${1:-}" ;;
 	status)     do_status ;;
 	health)     do_health ;;
 	logs)       shift; do_logs "${1:-100}" ;;

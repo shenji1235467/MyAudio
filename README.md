@@ -128,7 +128,10 @@ max_upload_mb: 100           # 预留：网页上传单文件上限
 # 查看自动生成的初始密码（直接运行时看终端；systemd 看日志）
 journalctl -u myaudio | grep "初始访问密码"
 
-# 修改密码：编辑 config.yaml，填入新的明文 password 并删掉旧的 password_hash，重启即可
+# 使用一键脚本时（推荐）：一键重置密码并自动重启生效，详见 4.0
+./run.sh reset-password
+
+# systemd 部署的手动方式：编辑 config.yaml，填入新的明文 password 并删掉旧的 password_hash
 #   password: "新密码"
 #   # password_hash: ...   ← 删除此行，让程序重新生成哈希
 sudo systemctl restart myaudio
@@ -140,7 +143,7 @@ sudo systemctl restart myaudio
 
 #### 4.0 一键脚本（推荐）
 
-项目根目录的 `run.sh` 封装了编译与常用启停操作，无需手动维护 PID：
+项目根目录的 `run.sh` 封装了编译、常用启停与密码重置操作，无需手动维护 PID：
 
 ```bash
 chmod +x run.sh          # 首次使用赋予执行权限
@@ -151,11 +154,25 @@ chmod +x run.sh          # 首次使用赋予执行权限
 ./run.sh health          # 调用 /healthz 健康检查
 ./run.sh logs            # 实时查看日志（Ctrl+C 退出），可加行数：./run.sh logs 200
 ./run.sh restart         # 重启（修改 config.yaml 后生效）
+./run.sh reset-password  # 一键重置访问密码（随机生成，自动重启生效）
+./run.sh passwd '新密码'  # 同上，但指定新密码
 ./run.sh stop            # 优雅停止（SIGTERM，最多等待 10s）
 ./run.sh force-stop      # 强制终止（SIGKILL，非必要不使用）
 ./run.sh foreground      # 前台运行（调试用，Ctrl+C 停止）
 ./run.sh help            # 查看全部命令
 ```
+
+**一键重置密码（忘记密码或 `password_hash` 损坏导致登录失败时）：**
+
+```bash
+./run.sh reset-password                  # 生成 16 位随机密码并打印（仅显示一次）
+./run.sh reset-password 'MyNewP@ss'      # 指定新密码
+CONFIG=/opt/myaudio/test.yaml ./run.sh reset-password   # 多实例同样支持
+```
+
+`reset-password`（别名 `passwd`）写入时只替换 `config.yaml` 中的 `password` / `password_hash` 两行，其余配置（监听地址、音频目录、扫描间隔、会话时长等）与注释原样保留；修改前会在同目录生成 `config.yaml.bak` 备份，配置文件与备份权限均为 `0600`，可用于回滚或对照原文。若服务正在运行，命令会自动优雅重启使新密码生效，内存中的旧登录会话同时失效；服务未运行时仅写入配置，下次 `./run.sh start` 生效。密码含空格或特殊字符时按 shell 规则加引号传参即可，脚本会按 YAML 规则转义。
+
+> 重启后程序会按既有行为用 YAML 序列化重写配置文件：把明文 `password` 转为 bcrypt 哈希写入 `password_hash` 并清空明文（之后登录校验只使用哈希，终端打印的新密码请立即保存），同时注释会丢失、字段顺序与时长格式被规范化。这与重置命令无关，`.bak` 保留了重置前的完整原文。
 
 脚本通过 PID 文件（默认 `myaudio.pid`）跟踪进程，能识别过期 PID、避免重复启动。多实例可用环境变量隔离：
 
