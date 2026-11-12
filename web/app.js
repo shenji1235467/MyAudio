@@ -254,8 +254,14 @@ function renderTracks() {
           ${fileLine(tr)}
         </div>
         <div class="card-actions">
-          <button class="mini-btn" data-act="playlist" data-id="${tr.id}">${t('library.addToList')}</button>
-          <button class="mini-btn danger" data-act="delete" data-id="${tr.id}">${t('common.delete')}</button>
+          <button class="mini-btn" data-act="playlist" data-id="${tr.id}" title="${t('library.addToList')}" aria-label="${t('library.addToList')}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span class="mini-btn-text">${t('library.addToList')}</span>
+          </button>
+          <button class="mini-btn danger" data-act="delete" data-id="${tr.id}" title="${t('common.delete')}" aria-label="${t('common.delete')}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+            <span class="mini-btn-text">${t('common.delete')}</span>
+          </button>
         </div>
       </div>`;
     }
@@ -834,15 +840,32 @@ function syncOrderChips() {
 }
 syncOrderChips();
 
+const VIEW_ICONS = {
+  grid: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>',
+  list: '<path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+};
+
+// 同步两个视图按钮的激活态，以及“更多”菜单里视图项（图标/文案提示“下一步切到哪个视图”）
+function syncViewToggle() {
+  const view = state.view;
+  const next = view === 'grid' ? 'list' : 'grid';
+  $('gridViewBtn').classList.toggle('active', view === 'grid');
+  $('listViewBtn').classList.toggle('active', view === 'list');
+  $('moreViewIcon').outerHTML =
+    '<svg id="moreViewIcon" width="18" height="18" viewBox="0 0 24 24" fill="' +
+    (next === 'grid' ? 'currentColor' : 'none') + '">' + VIEW_ICONS[next] + '</svg>';
+  $('moreViewText').textContent = t(next === 'grid' ? 'nav.gridView' : 'nav.listView');
+}
+
 function setView(view) {
   state.view = view;
   localStorage.setItem('myaudio_view', view);
-  $('gridViewBtn').classList.toggle('active', view === 'grid');
-  $('listViewBtn').classList.toggle('active', view === 'list');
+  syncViewToggle();
   renderTracks();
 }
 $('gridViewBtn').addEventListener('click', () => setView('grid'));
 $('listViewBtn').addEventListener('click', () => setView('list'));
+$('moreView').addEventListener('click', () => { setView(state.view === 'grid' ? 'list' : 'grid'); closeMoreMenu(); });
 $('loadMoreBtn').addEventListener('click', () => loadTracks(false));
 
 // ---------------- 主题（明亮 / 暗色，默认明亮） ----------------
@@ -858,6 +881,8 @@ function setTheme(theme) {
   localStorage.setItem('myaudio_theme', theme);
   document.documentElement.setAttribute('data-theme', theme);
   $('themeIcon').outerHTML = THEME_ICONS[theme].replace('<svg ', '<svg id="themeIcon" ');
+  $('moreThemeIcon').outerHTML = THEME_ICONS[theme]
+    .replace('<svg ', '<svg id="moreThemeIcon" width="18" height="18" ');
   $('themeBtn').title = theme === 'dark' ? t('theme.toLight') : t('theme.toDark');
   const meta = document.getElementById('metaThemeColor');
   if (meta) meta.setAttribute('content', THEME_COLOR[theme]);
@@ -865,6 +890,29 @@ function setTheme(theme) {
 $('themeBtn').addEventListener('click', () => {
   setTheme(state.theme === 'dark' ? 'light' : 'dark');
 });
+$('moreTheme').addEventListener('click', () => {
+  setTheme(state.theme === 'dark' ? 'light' : 'dark');
+  closeMoreMenu();
+});
+
+// ---------------- 顶栏“更多”菜单（窄屏） ----------------
+function openMoreMenu() {
+  $('moreMenu').classList.add('open');
+  $('moreBtn').setAttribute('aria-expanded', 'true');
+}
+function closeMoreMenu() {
+  $('moreMenu').classList.remove('open');
+  $('moreBtn').setAttribute('aria-expanded', 'false');
+}
+$('moreBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if ($('moreMenu').classList.contains('open')) closeMoreMenu(); else openMoreMenu();
+});
+$('moreMenu').addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', closeMoreMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMoreMenu(); });
+$('moreLang').addEventListener('click', () => { I18N.toggleLang(); closeMoreMenu(); });
+$('moreScan').addEventListener('click', () => { closeMoreMenu(); $('scanBtn').click(); });
 
 // 手动扫描（前端防重入，避免并发轮询叠加）
 let scanPolling = false;
@@ -874,6 +922,7 @@ $('scanBtn').addEventListener('click', async () => {
     await api('/api/scan', { method: 'POST' });
     toast(t('scan.started'), 'success');
     $('scanIcon').classList.add('spin');
+    $('moreScanIcon').classList.add('spin');
     pollScan();
   } catch (err) {
     toast(err.message, 'error');
@@ -897,6 +946,7 @@ async function pollScan() {
   } finally {
     scanPolling = false;
     $('scanIcon').classList.remove('spin');
+    $('moreScanIcon').classList.remove('spin');
   }
 }
 
@@ -1117,6 +1167,7 @@ $('langBtn').addEventListener('click', () => I18N.toggleLang());
 document.addEventListener('langchange', () => {
   // 主题/模式按钮 title（applyDOM 不覆盖这些运行时改写的属性）
   setTheme(state.theme);
+  syncViewToggle();
   setMode(state.mode, true);
   // 定时下拉选项（保留当前倒计时显示）
   resetSleepOptionText();

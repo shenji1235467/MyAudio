@@ -23,6 +23,7 @@
     'nav.playlists': 'Playlists',
     'nav.logout': 'Log out',
     'nav.switchLang': '切换为中文',
+    'nav.more': 'More',
     'nav.folders': 'Folders',
 
     // Player

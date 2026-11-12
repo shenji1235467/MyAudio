@@ -23,6 +23,7 @@
     'nav.playlists': '播放列表',
     'nav.logout': '退出登录',
     'nav.switchLang': 'Switch to English',
+    'nav.more': '更多操作',
     'nav.folders': '目录',
 
     // 播放器
