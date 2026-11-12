@@ -1,0 +1,28 @@
+# MyAudio 配置文件
+# 首次启动若不存在 config.yaml，程序会自动生成并随机创建访问密码（打印在标准输出/日志中）。
+
+# 监听地址，默认端口 8083。
+#   仅本机/反代后端： "127.0.0.1:8083"（推荐，nginx 等反代转发到此）
+#   局域网/手机直连：  ":8083"（等价 0.0.0.0:8083，监听所有网卡）
+listen: "0.0.0.0:8083"
+
+# 本地音频目录（递归扫描，支持 .mp3 .wav .flac .ogg .m4a）
+music_dir: "./data/music"
+
+# 数据目录：SQLite 数据库与封面缓存
+data_dir: "./data"
+
+# 访问密码（明文，首次启动后会转为 password_hash 保存；password 与 password_hash 二选一）
+# 留空且不提供 config.yaml 时，首次启动会自动生成 10 位随机密码并打印到日志。
+password: "change-me-please"
+# password_hash: "$2a$10$...."   # bcrypt 哈希，优先级高于 password
+
+# 定时扫描间隔；设为 0s 关闭定时扫描（仍可通过页面按钮手动扫描），负值同样视为关闭。
+# 注意时长需带单位（如 5m / 30s / 1h），裸数字 0 无法解析。
+scan_interval: 5m
+
+# 登录会话有效期
+session_ttl: 168h   # 7 天
+
+# 预留：后续网页上传功能的单文件大小上限（MB）
+max_upload_mb: 100

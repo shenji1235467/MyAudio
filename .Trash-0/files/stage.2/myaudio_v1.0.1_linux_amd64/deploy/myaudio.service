@@ -1,0 +1,48 @@
+[Unit]
+Description=MyAudio 个人在线音频播放服务
+Documentation=https://github.com/yourname/MyAudio
+After=network.target
+
+[Service]
+Type=simple
+# 运行用户（建议使用专用低权限用户；如用当前用户请修改 User/Group）
+User=myaudio
+Group=myaudio
+
+# 工作目录与配置（config.yaml 放在 WorkingDirectory 下）
+WorkingDirectory=/opt/myaudio
+ExecStart=/opt/myaudio/myaudio -config /opt/myaudio/config.yaml
+
+# 优雅退出：先发 SIGTERM，等待 10 秒后强杀
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# 崩溃自动重启
+Restart=on-failure
+RestartSec=3
+
+# 资源与安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# 仅放行音频目录与数据目录的写入
+ReadWritePaths=/opt/myaudio/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# 资源占用上限（个人服务，留足余量）
+MemoryMax=128M
+TasksMax=128
+
+# 日志走 journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=myaudio
+
+[Install]
+WantedBy=multi-user.target

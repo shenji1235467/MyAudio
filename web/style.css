@@ -599,16 +599,35 @@ a { color: inherit; }
   .progress-desktop { display: none; }
   .mobile-progress { display: block; }
 }
+/* 手机端：封面/曲目信息独占第一行，两组播放控件同排（左 transport / 右 controls）。
+   用 grid 固定两行结构，避免控件组被 flex 挤到下一行、形成上下错行与大片空白。
+   两个下拉改为固定宽度，选中 1.25x 或显示倒计时时也不会撑破控制行。 */
 @media (max-width: 639px) {
   .player-bar { margin: 16px 0 8px; }
-  .player-inner { padding: 10px 12px; gap: 10px; row-gap: 8px; flex-wrap: wrap; }
-  .player-now { order: 1; flex: 1 1 auto; max-width: none; }
-  .player-transport { order: 2; }
-  .player-controls { order: 3; flex: 1 1 100%; justify-content: flex-end; gap: 8px; }
+  .player-inner {
+    display: grid; grid-template-columns: auto minmax(0, 1fr);
+    align-items: center; column-gap: 8px; row-gap: 10px; padding: 10px 12px;
+  }
+  .player-now { grid-column: 1 / -1; max-width: none; }
+  .player-transport { grid-column: 1; justify-self: start; gap: 2px; }
+  .player-controls { grid-column: 2; justify-self: end; min-width: 0; gap: 6px; }
+  .player-inner .icon-btn { width: 36px; height: 36px; border-radius: 10px; }
   .np-cover { width: 42px; height: 42px; }
   .play-btn-main { width: 42px; height: 42px; }
-  .speed-select { height: 30px; min-width: 46px; padding-left: 9px; }
-  .sleep-select { min-width: 64px; }
+  .player-controls .speed-select {
+    width: 58px; min-width: 0; height: 30px; padding: 0 18px 0 8px;
+    background-position: right 6px center;
+  }
+  .player-controls .sleep-select { width: 76px; min-width: 0; }
+}
+/* 超窄屏（≤360px）：进一步收紧尺寸，保证六个控件仍在同一行 */
+@media (max-width: 360px) {
+  .player-inner { padding: 10px; column-gap: 6px; }
+  .player-inner .icon-btn { width: 32px; height: 32px; }
+  .play-btn-main { width: 38px; height: 38px; }
+  .player-controls { gap: 4px; }
+  .player-controls .speed-select { width: 52px; }
+  .player-controls .sleep-select { width: 68px; }
 }
 
 /* 抽屉 */
