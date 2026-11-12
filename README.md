@@ -44,6 +44,9 @@ MyAduio/
 │   ├── i18n.js                # 轻量 i18n 引擎（t()/setLang/langchange 事件）
 │   └── locales/               # 词条字典：zh-CN.js、en.js
 ├── deploy/myaudio.service     # systemd 单元
+├── scripts/release.sh         # 发布包打包（含预编译二进制）
+├── dist/                      # 预编译发布包 *.tar.gz 与 .sha256 校验文件
+├── run.sh                     # 一键编译/启停/管理脚本
 ├── config.example.yaml        # 配置示例
 └── go.mod / go.sum
 ```
@@ -65,13 +68,23 @@ MyAduio/
 
 ### 1. 编译
 
-要求 Go 1.22+。
+从源码编译要求 **Go 1.26.0+**（`go.mod` 中的 `go` 指令；低版本无法解析依赖）。
 
 ```bash
 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o myaudio ./cmd/myaudio
 ```
 
 产物 `myaudio` 为静态链接单二进制（约 25MB），可直接拷贝到目标 Linux 机器运行。
+
+> **没有 Go 也能运行**：`./run.sh build` / `./run.sh start` 在检测不到 Go 工具链时，会自动校验并解压 `dist/` 下与当前平台匹配的预编译发布包（`scripts/release.sh` 产物），无需联网安装工具链。也可手动使用发布包：
+>
+> ```bash
+> (cd dist && sha256sum -c myaudio_v1.0.1_linux_amd64.tar.gz.sha256)  # 校验
+> tar -xzf dist/myaudio_v1.0.1_linux_amd64.tar.gz
+> cp myaudio_v1.0.1_linux_amd64/myaudio ./myaudio && chmod +x ./myaudio
+> ```
+>
+> 包名中的 `linux_amd64` 必须与本机平台一致；详见「故障排查」。
 
 ### 2. 配置
 
@@ -316,6 +329,51 @@ journalctl -u myaudio --since "1 hour ago"   # 查看最近一小时日志
 > ```
 >
 > 若不使用反代、改为 `:8083` 全网卡直连，则放行 8083 端口即可。
+
+## 故障排查
+
+### `./run.sh start` 报 `[ FAIL ] 未找到 Go 工具链`
+
+**现象**（2026-11-12，Debian 13 / x86_64，仓库根目录执行）：
+
+```text
+➜ ./run.sh start
+[ WARN ] 二进制不存在，先执行编译 ...
+[run.sh] 编译 ./cmd/myaudio ...
+[ FAIL ] 未找到 Go 工具链，请安装 Go 1.22+ 或将其加入 PATH
+```
+
+**原因**
+
+1. `run.sh start` 发现 `myaudio` 不存在时会自动调用 `do_build` 编译；该环境 `PATH` 中没有 `go`，`/usr/local/go/bin/go` 也不存在，编译随即中止。
+2. 错误文案写的是「Go 1.22+」，但 `go.mod` 声明 `go 1.26.0`，README「快速开始」也沿用了 1.22+；按旧提示安装低版本 Go 仍会因依赖解析失败。
+3. 仓库自带 `dist/myaudio_v1.0.1_linux_amd64.tar.gz`（含已编译二进制与 `.sha256`），旧脚本没有利用，导致无 Go 的离线环境无法启动。
+
+**已修复**
+
+- `run.sh` 新增 `restore_from_release()`：无 Go 工具链时，按 `uname -s/-m` 推导平台（如 `linux_amd64`），在 `dist/` 中选取匹配的最新发布包，先用 `sha256sum -c` 校验完整性，再解压出 `myaudio`（权限 `0755`）作为 `build` 的结果；找不到可用包时才报错，并给出从 `go.mod` 读取的准确版本要求、PATH 配置与发布包放置建议。
+- `run.sh` 新增 `listen_sockets()`：最小化镜像常缺 `ss`（iproute2），原先端口占用预检会静默失效，启动轮询与 `status` 误报「未检测到端口监听」。现在自动回退 `netstat` 并统一列格式，端口冲突检测与占用进程定位均可用。
+- 文档与脚本提示中的 Go 版本统一为 **`go.mod` 的 1.26.0+**。
+
+**处理方式（任选其一）**
+
+| 场景 | 操作 |
+|---|---|
+| 仓库带 `dist/` 发布包（推荐，无需 Go） | 直接 `./run.sh start`，脚本自动校验并恢复二进制 |
+| 需要修改源码重新编译 | 安装 Go 1.26.0+，`export PATH=/usr/local/go/bin:$PATH`，用 `go version` 确认后执行 `./run.sh build` |
+| Go 已安装但不在 PATH | 把 `/usr/local/go/bin` 写入 `~/.zshrc` / `~/.bashrc` 的 `PATH` 后重试 |
+| 手工使用发布包 | `cd dist && sha256sum -c <包名>.tar.gz.sha256`，`tar -xzf <包名>.tar.gz`，把包内 `myaudio` 复制到仓库根目录并 `chmod +x` |
+
+> 发布包由 `scripts/release.sh` 生成，仅含运行时文件。若 `dist/` 中的包与本机平台不匹配（如 arm64 机器只有 amd64 包），需在有 Go 的机器上用 `TARGETS=linux/arm64 ./scripts/release.sh` 重新打包，或安装 Go 后本地编译。
+
+**验证结果**（本机，主实例保持运行；另用 `127.0.0.1:18084` 的第二实例做完整启动链路验证）：
+
+- `bash -n run.sh` 通过；`./run.sh build` → `[  OK  ] 已从发布包恢复：/workspace/myaudio (25M)`，二进制权限 `0755`。
+- 第二实例 `start` 无警告通过（`[  OK  ] 服务已启动`），`status` → `[  OK  ] 端口 127.0.0.1:18084 正在监听`，`health` 返回 `{"status":"ok"}`，`stop` 优雅退出。
+- 主实例 `./run.sh health` → `{"status":"ok"}`；重复执行 `./run.sh start` 能正确提示「服务已在运行」。
+- 从源码编译的分支本环境没有 Go 工具链，未实测；预编译包回退与端口检测分支均已实测通过。
+
+> 首次启动会按既有行为把 `config.yaml` 中的明文 `password` 转为 `password_hash` 并重写配置文件（注释与时长格式被规范化），属正常现象，详见「3. 初始化密码与首次登录」。
 
 ## API 一览
 

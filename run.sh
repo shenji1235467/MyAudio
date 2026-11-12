@@ -80,6 +80,35 @@ normalize_host() {
 	esac
 }
 
+# 列出 TCP 监听 socket，统一输出为 ss -ltn[p] 的列格式（不含表头）：
+#   State Recv-Q Send-Q LocalAddress:Port PeerAddress:Port [Process]
+# 最小化镜像常缺 iproute2（无 ss），此时回退 netstat（net-tools）并重排列，
+# 否则端口占用预检会静默失效，启动/状态检查产生误报。
+# 参数：$1="proc" 时附带进程信息（供 port_owners 使用）。
+listen_sockets() {
+	if command -v ss >/dev/null 2>&1; then
+		if [ "${1:-}" = "proc" ]; then
+			ss -ltnp 2>/dev/null | tail -n +2
+		else
+			ss -ltn 2>/dev/null | tail -n +2
+		fi
+		return 0
+	fi
+	if command -v netstat >/dev/null 2>&1; then
+		if [ "${1:-}" = "proc" ]; then
+			# netstat -ltnp: Proto Recv-Q Send-Q Local Foreign State PID/Program
+			netstat -ltnp 2>/dev/null | awk '$1 ~ /^tcp/ && $6 == "LISTEN" && $7 ~ /\// {
+				split($7, p, "/")
+				print "LISTEN", $2, $3, $4, $5, "users:((\"" p[2] "\",pid=" p[1] "))"
+			}'
+		else
+			netstat -ltn 2>/dev/null | awk '$1 ~ /^tcp/ && $6 == "LISTEN" {
+				print $6, $2, $3, $4, $5
+			}'
+		fi
+	fi
+}
+
 # 判断目标 地址:端口 是否与现有监听冲突（0=冲突，1=可绑定）。
 # 规则：同端口下，任一方为通配符 *，或两者具体地址相同，即为冲突；
 # 不同具体地址（如 nginx 绑公网 IP、服务绑 127.0.0.1）可共存，不算冲突。
@@ -90,7 +119,7 @@ port_in_use() {
 	want_port="$2"
 	[ -n "$want_port" ] || return 1
 
-	# ss 列：State Recv-Q Send-Q Local Address:Port Peer ... 第4列为本地地址
+	# 统一列格式的第4列为本地地址
 	local _state _recv _send addr rest host port
 	while read -r _state _recv _send addr rest; do
 		[ -n "$addr" ] || continue
@@ -100,7 +129,7 @@ port_in_use() {
 		if [ "$host" = "*" ] || [ "$want_host" = "*" ] || [ "$host" = "$want_host" ]; then
 			return 0
 		fi
-	done < <(ss -ltn 2>/dev/null | tail -n +2)
+	done < <(listen_sockets)
 	return 1
 }
 
@@ -109,7 +138,7 @@ port_owners() {
 	local want_host want_port
 	want_host="$(normalize_host "$1")"
 	want_port="$2"
-	# ss -p 列：前4列同上，进程信息在第6列起的 users:(...)
+	# 带进程信息时，第6列起为 users:(...) 形式的进程信息
 	local _state _recv _send addr _peer rest host port
 	while read -r _state _recv _send addr _peer rest; do
 		[ -n "$addr" ] || continue
@@ -120,7 +149,7 @@ port_owners() {
 			echo "$rest" | grep -oE 'users:\(\("[^"]+",pid=[0-9]+' \
 				| sed -E 's/users:\(\("//; s/",pid=/ /'
 		fi
-	done < <(ss -ltnp 2>/dev/null | tail -n +2) | sort -u
+	done < <(listen_sockets proc) | sort -u
 }
 
 # 启动前统一校验：存活进程 / 端口占用，任一冲突即中止。
@@ -175,23 +204,89 @@ wait_healthy() {
 }
 
 # ---- 命令实现 ----
-do_build() {
-	info "编译 $MAIN_PKG ..."
-	if ! command -v go >/dev/null 2>&1; then
-		# 兼容官方 tar 包安装到 /usr/local/go 的环境
-		[ -x /usr/local/go/bin/go ] && export PATH="/usr/local/go/bin:$PATH"
+
+# 从 go.mod 读取项目要求的最低 Go 版本，避免错误提示与依赖声明脱节
+required_go_version() {
+	awk '$1 == "go" { print $2; exit }' "$SCRIPT_DIR/go.mod" 2>/dev/null || true
+}
+
+# 当前平台标识（如 linux_amd64），用于匹配 dist/ 下的预编译发布包
+target_platform() {
+	local os arch
+	os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+	case "$(uname -m)" in
+		x86_64|amd64)  arch="amd64" ;;
+		aarch64|arm64) arch="arm64" ;;
+		*)             arch="$(uname -m)" ;;
+	esac
+	echo "${os}_${arch}"
+}
+
+# 无 Go 工具链时的兜底：从 dist/ 下匹配当前平台的发布包恢复单二进制。
+# 归档由 scripts/release.sh 生成，包内目录名与包名一致，含 myaudio 可执行文件。
+restore_from_release() {
+	local platform pkg base member tmp
+	platform="$(target_platform)"
+	pkg="$(ls -1 "$SCRIPT_DIR"/dist/myaudio_*_"${platform}".tar.gz 2>/dev/null \
+		| sort | tail -1 || true)"
+	[ -n "$pkg" ] && [ -f "$pkg" ] || return 1
+
+	# 有校验文件时先验完整性，避免解压损坏或被篡改的归档
+	if [ -f "$pkg.sha256" ] && \
+		! ( cd "$(dirname "$pkg")" && sha256sum -c "$(basename "$pkg").sha256" ) >/dev/null 2>&1; then
+		err "发布包 SHA256 校验失败：$pkg.sha256"
+		return 1
 	fi
+
+	base="$(basename "$pkg" .tar.gz)"
+	member="${base}/myaudio"
+	if ! tar -tzf "$pkg" "$member" >/dev/null 2>&1; then
+		err "发布包内缺少二进制：$member"
+		return 1
+	fi
+
+	tmp="$(mktemp "${BIN}.XXXXXX")"
+	if ! tar -xzOf "$pkg" "$member" > "$tmp"; then
+		rm -f "$tmp"
+		err "从发布包解压二进制失败：$pkg"
+		return 1
+	fi
+	chmod 755 "$tmp"
+	mv -f "$tmp" "$BIN" || { rm -f "$tmp"; return 1; }
+	return 0
+}
+
+do_build() {
+	# 兼容官方 tar 包安装到 /usr/local/go 的环境
+	if ! command -v go >/dev/null 2>&1 && [ -x /usr/local/go/bin/go ]; then
+		export PATH="/usr/local/go/bin:$PATH"
+	fi
+
 	if ! command -v go >/dev/null 2>&1; then
-		err "未找到 Go 工具链，请安装 Go 1.22+ 或将其加入 PATH"
+		warn "未找到 Go 工具链，尝试从 dist/ 预编译发布包恢复二进制 ..."
+		if restore_from_release; then
+			ok "已从发布包恢复：$BIN ($(du -h "$BIN" | cut -f1))"
+			return 0
+		fi
+		local req; req="$(required_go_version)"
+		err "未找到 Go 工具链，且 dist/ 下没有适用于 $(target_platform) 的预编译发布包"
+		echo >&2
+		echo "  处理建议：" >&2
+		echo "    1) 安装 Go ${req:-1.26.0}+ 并把 <Go安装目录>/bin 加入 PATH：" >&2
+		echo "       export PATH=/usr/local/go/bin:\$PATH" >&2
+		echo "    2) 或将 release 包放到 dist/myaudio_<版本>_$(target_platform).tar.gz 后重试" >&2
+		echo "    3) 详见 README「故障排查」" >&2
 		exit 1
 	fi
+
+	info "编译 $MAIN_PKG ..."
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$BIN" "$MAIN_PKG"
 	ok "编译完成：$BIN ($(du -h "$BIN" | cut -f1))"
 }
 
 do_start() {
 	if [ ! -x "$BIN" ]; then
-		warn "二进制不存在，先执行编译 ..."
+		warn "二进制不存在，尝试编译或使用预编译包 ..."
 		do_build
 	fi
 	if [ ! -f "$CONFIG" ]; then
@@ -366,7 +461,7 @@ do_logs() {
 }
 
 do_foreground() {
-	[ -x "$BIN" ] || { warn "二进制不存在，先执行编译 ..."; do_build; }
+	[ -x "$BIN" ] || { warn "二进制不存在，尝试编译或使用预编译包 ..."; do_build; }
 	[ -f "$CONFIG" ] || { err "配置文件不存在：$CONFIG"; exit 1; }
 	# 前台模式同样预检，避免端口冲突导致进程 fatal 退出
 	guard_start
@@ -381,7 +476,7 @@ ${BLUE}MyAudio 服务管理脚本${NC}
 用法：${GREEN}./run.sh${NC} <命令>
 
 命令：
-  build        编译生成单二进制 $BIN
+  build        编译生成单二进制 $BIN（无 Go 工具链时自动回退到 dist/ 预编译包）
   start        后台启动（nohup，日志写入 $LOG_FILE；启动前预检端口占用，
                启动后轮询确认端口监听，失败自动打印日志并清理 PID）
   stop         优雅停止（SIGTERM，最多等待 10s；PID 文件丢失时自动定位孤儿进程）
