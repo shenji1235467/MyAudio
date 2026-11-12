@@ -16,6 +16,9 @@
 /tmp/
 *.log
 *.pid
+/dist/stage/
+# 桌面环境回收站目录（.Trash-0 等）
+.Trash-*/
 
 # 编辑器
 .idea/
