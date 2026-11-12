@@ -125,11 +125,12 @@ a { color: inherit; }
   background: linear-gradient(90deg, var(--primary), var(--accent) 55%, var(--pink));
   -webkit-background-clip: text; background-clip: text; color: transparent;
   font-weight: 700; letter-spacing: .5px; text-decoration: none; font-size: 20px;
+  flex-shrink: 0; white-space: nowrap;
 }
 
 /* 顶栏 */
 .topbar { border-bottom: 1px solid var(--glass-border); position: sticky; top: 0; z-index: 30; }
-.topbar-inner { height: 64px; display: flex; align-items: center; gap: 12px; }
+.topbar-inner { height: 64px; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .icon-btn {
   width: 40px; height: 40px; border-radius: 12px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -149,7 +150,7 @@ a { color: inherit; }
 .avatar:hover { transform: scale(1.08); }
 
 /* 搜索 */
-.search-wrap { position: relative; flex: 1; max-width: 448px; }
+.search-wrap { position: relative; flex: 1 1 auto; min-width: 0; max-width: 448px; }
 .search-wrap .search-icon {
   position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
   color: var(--text-secondary); pointer-events: none;
@@ -167,6 +168,41 @@ a { color: inherit; }
 .search-input::placeholder { color: var(--text-secondary); }
 .search-input:focus { border-color: rgba(124,92,255,.6); box-shadow: 0 0 0 3px rgba(124,92,255,.18); }
 .spacer { flex: 1; }
+/* 更多操作：桌面端隐藏，窄屏收起顶栏次级按钮后由此入口打开 */
+.more-wrap { position: relative; display: none; flex-shrink: 0; }
+.more-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+  min-width: 190px; padding: 6px; border-radius: 14px;
+  /* 菜单浮在播放器之上，用不透明底色，避免与下层内容叠影 */
+  background: var(--bg-primary);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 16px 40px var(--card-shadow);
+  display: none; flex-direction: column; gap: 2px;
+}
+.more-menu.open { display: flex; }
+.more-menu-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 10px; cursor: pointer;
+  background: transparent; border: none; color: var(--text-primary);
+  font-size: 13px; text-align: left; white-space: nowrap;
+  transition: background .18s ease, color .18s ease;
+}
+.more-menu-item svg { color: var(--text-secondary); flex-shrink: 0; }
+.more-menu-item:hover { background: var(--hover-1); }
+.more-menu-item:hover svg { color: var(--primary); }
+
+/* 窄屏顶栏：语言/主题/扫描收进“更多”菜单，给搜索留出空间 */
+@media (max-width: 900px) {
+  .topbar-secondary { display: none; }
+  .more-wrap { display: block; }
+}
+/* 更窄（手机）：视图切换也收进“更多”菜单，搜索独占一行，避免挤压成一团 */
+@media (max-width: 760px) {
+  .topbar-inner { height: auto; flex-wrap: wrap; padding: 10px 0; gap: 8px; row-gap: 10px; }
+  .topbar .logo { font-size: 18px; }
+  .topbar-view { display: none; }
+  .search-wrap { order: 10; flex: 1 1 100%; max-width: none; }
+}
 
 /* 芯片 */
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -319,7 +355,7 @@ a { color: inherit; }
 /* 续播徽标：提示上次播放位置，点击可从该位置继续 */
 .resume-badge {
   display: inline-flex; align-items: center; gap: 4px;
-  margin-top: 5px;
+  margin-top: 5px; max-width: 100%; white-space: nowrap; overflow: hidden;
   padding: 2px 9px; border-radius: 999px;
   font-size: 11px; font-weight: 600; cursor: pointer;
   color: var(--folder-blue-strong);
@@ -328,6 +364,8 @@ a { color: inherit; }
   transition: background .18s ease;
 }
 .resume-badge:hover { background: var(--folder-active-hover); }
+.resume-badge svg { flex-shrink: 0; }
+.resume-badge span { overflow: hidden; text-overflow: ellipsis; }
 
 /* 播放列表选择器 */
 .picker-list {
@@ -403,7 +441,8 @@ a { color: inherit; }
 .card-artist { color: var(--text-secondary); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card-actions { display: flex; gap: 6px; margin-top: 8px; }
 .mini-btn {
-  flex: 1; padding: 5px 0; border-radius: 8px; cursor: pointer; font-size: 11px;
+  flex: 1; padding: 5px 8px; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; cursor: pointer; font-size: 11px;
   background: var(--surface-2); border: 1px solid var(--glass-border); color: var(--text-secondary);
   transition: all .2s ease;
 }
@@ -417,6 +456,12 @@ a { color: inherit; }
 .list-view .card-body { padding: 0; flex: 1; min-width: 0; }
 .list-view .card-actions { margin-top: 0; flex: 0 0 auto; }
 .list-view .badge, .list-view .play-overlay { display: none; }
+/* 极窄屏的列表视图：操作按钮只留图标，把横向空间还给标题 */
+@media (max-width: 480px) {
+  .list-view .card-actions { gap: 4px; }
+  .list-view .mini-btn { flex: 0 0 auto; width: 32px; padding: 5px 0; }
+  .list-view .mini-btn-text { display: none; }
+}
 
 /* 空状态 */
 .empty {
@@ -453,9 +498,16 @@ a { color: inherit; }
 .player-inner {
   margin: 0 auto;
   border-radius: var(--radius);
-  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
   box-shadow: 0 10px 30px var(--card-shadow);
+  min-width: 0;
 }
+/* 左段：封面 + 曲目信息 */
+.player-now { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 260px; flex: 0 1 auto; }
+/* 中段：上一首 / 播放 / 下一首 */
+.player-transport { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+/* 右段：模式 / 倍速 / 定时 */
+.player-controls { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .progress-desktop {
   display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0;
 }
@@ -468,7 +520,7 @@ a { color: inherit; }
   0%, 100% { box-shadow: 0 0 0 0 rgba(124,92,255,.45); }
   50%      { box-shadow: 0 0 0 10px rgba(124,92,255,0); }
 }
-.np-meta { min-width: 0; width: 150px; flex-shrink: 0; }
+.np-meta { min-width: 0; flex: 1 1 auto; }
 .np-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .np-artist { color: var(--text-secondary); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .play-btn-main {
@@ -542,17 +594,21 @@ a { color: inherit; }
 }
 /* 移动细进度条：桌面端隐藏，仅窄屏显示（桌面端用带时间文字的 .progress-desktop） */
 .mobile-progress { display: none; height: 4px; border-radius: 999px; margin-top: 8px; }
+/* 窄屏（含平板竖屏）：带时间文字的进度条会被挤成一小段，统一隐藏，改用下方细进度条 */
+@media (max-width: 767px) {
+  .progress-desktop { display: none; }
+  .mobile-progress { display: block; }
+}
 @media (max-width: 639px) {
   .player-bar { margin: 16px 0 8px; }
-  .player-inner { padding: 10px 12px; gap: 8px; }
-  .np-meta { width: auto; flex: 1; min-width: 0; }
+  .player-inner { padding: 10px 12px; gap: 10px; row-gap: 8px; flex-wrap: wrap; }
+  .player-now { order: 1; flex: 1 1 auto; max-width: none; }
+  .player-transport { order: 2; }
+  .player-controls { order: 3; flex: 1 1 100%; justify-content: flex-end; gap: 8px; }
   .np-cover { width: 42px; height: 42px; }
   .play-btn-main { width: 42px; height: 42px; }
   .speed-select { height: 30px; min-width: 46px; padding-left: 9px; }
   .sleep-select { min-width: 64px; }
-  /* 窄屏隐藏带时间文字的桌面进度条，仅保留下方细进度条，避免双进度条 */
-  .progress-desktop { display: none; }
-  .mobile-progress { display: block; }
 }
 
 /* 抽屉 */
